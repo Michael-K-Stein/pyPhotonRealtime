@@ -46,14 +46,14 @@ separate layer and doesn't change the core.
 - [x] Master Server hop with token; direct-master mode (`use_name_server=False`)
 - [x] Disconnect causes, `reconnect_to_master`
 - [x] Custom authentication (`AuthenticationValues`; post data as `str` or `bytes`)
-- [ ] e2e: Name Server -> Master Server against Photon Cloud (written; first run is on master CI)
+- [x] e2e: Name Server -> Master Server against Photon Cloud
 
 ### M3: Matchmaking and lobbies
 - [x] Join/leave lobby, room list and `GameListUpdate` events, lobby stats
 - [x] Create / Join / JoinOrCreate / JoinRandom / Rejoin, then the Game Server hop
 - [x] `reconnect_and_rejoin` (needs the Game Server hop)
 - [x] `OpFindFriends`, expected users, SQL lobby filters
-- [ ] e2e: create, join and leave a room on Photon Cloud (written; first run is on master CI)
+- [x] e2e: create, join and leave a room on Photon Cloud
 
 ### M4: In-room
 - [ ] Join/Leave/PropertiesChanged events, then update `Room`/`Player` and fire callbacks
