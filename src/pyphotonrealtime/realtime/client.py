@@ -912,6 +912,8 @@ class RealtimeClient:
             return
 
         params = response.parameters
+        # The Master Server hands out a token bound to the chosen Game Server.
+        self._store_authentication(params)
         if (room_name := params.get(ParameterKey.GameId)) is not None:
             enter.params = dataclasses.replace(
                 enter.params, room_name=str(room_name.value)

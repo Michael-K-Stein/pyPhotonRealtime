@@ -131,12 +131,25 @@ class Recorder(ConnectionCallbacks, MatchmakingCallbacks, LobbyCallbacks):
         return [name for name, _ in self.calls]
 
 
+GAME_TOKEN = "game-token"  # noqa: S105 -- fake token
+WRONG_GAME_SERVER = 32738
+
+
 def enter_on_master(request: CommandParams) -> tuple[int, CommandParams]:
     room = request.get(ParameterKey.GameId, StringParameter(ROOM))
     return 0, {
         ParameterKey.Address: StringParameter(GAME_SERVER),
         ParameterKey.GameId: room,
+        # Like Photon Cloud: a token only the chosen Game Server accepts.
+        ParameterKey.Token: StringParameter(GAME_TOKEN),
     }
+
+
+def authenticate_on_game_server(request: CommandParams) -> tuple[int, CommandParams]:
+    token = request.get(ParameterKey.Token)
+    if token is None or token.value != GAME_TOKEN:
+        return WRONG_GAME_SERVER, {}
+    return 0, {}
 
 
 def enter_on_game_server(_request: CommandParams) -> tuple[int, CommandParams]:
@@ -175,6 +188,7 @@ def master_server() -> FakeServer:
 @pytest.fixture
 def game_server() -> FakeServer:
     server = FakeServer(GAME_SERVER)
+    server.handlers[OperationCode.Authenticate] = authenticate_on_game_server
     server.handlers[OperationCode.CreateGame] = enter_on_game_server
     server.handlers[OperationCode.JoinGame] = enter_on_game_server
     return server
@@ -375,9 +389,9 @@ def test_create_room_hops_to_game_server(
     assert master_server.ops(OperationCode.CreateGame) == [
         {ParameterKey.GameId: StringParameter(ROOM), ParameterKey.Add: strings("bob")}
     ]
-    # The Game Server authenticates with the token, then gets the full request.
+    # The Game Server authenticates with the Master's token, then gets the request.
     assert game_server.ops(OperationCode.Authenticate) == [
-        {ParameterKey.Token: StringParameter("token-1")}
+        {ParameterKey.Token: StringParameter(GAME_TOKEN)}
     ]
     (create,) = game_server.ops(OperationCode.CreateGame)
     assert create[ParameterKey.GameId] == StringParameter(ROOM)
@@ -574,7 +588,7 @@ def test_reconnect_and_rejoin_after_drop(
     run(client, ClientState.Joined)
     assert cloud.connections[-1] == GAME_SERVER
     assert game_server.ops(OperationCode.Authenticate)[-1] == {
-        ParameterKey.Token: StringParameter("token-1")
+        ParameterKey.Token: StringParameter(GAME_TOKEN)
     }
     rejoin = game_server.ops(OperationCode.JoinGame)[-1]
     assert rejoin[ParameterKey.GameId] == StringParameter(ROOM)
