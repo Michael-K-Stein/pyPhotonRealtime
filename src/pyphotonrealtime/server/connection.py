@@ -23,6 +23,7 @@ from pyphotonrealtime.protocol.photon_enc import generate_dh_keys
 
 if TYPE_CHECKING:
     import socket
+    from collections.abc import Callable
 
     from pyphotonrealtime.peer import Parameters
     from pyphotonrealtime.protocol.enum_lookups import CommandParams
@@ -73,23 +74,48 @@ class Connection:
     closing: bool = False
     """Close once the outbox is flushed."""
     started: float = field(default_factory=time.monotonic)
+    last_received: float = field(default_factory=time.monotonic)
+    """When the client last sent anything; for the idle timeout."""
+    preamble: bytearray | None = field(default_factory=bytearray)
+    """Raw bytes received until the Init is accepted, for a passthrough relay."""
+    passthrough: tuple[str, int] | None = None
+    """Where to relay this client to instead of serving it."""
 
     @property
     def authenticated(self) -> bool:
         """Whether the client has passed Authenticate on this server."""
         return self.session is not None
 
-    def feed(self, data: bytes) -> list[PhotonPacket]:
+    def feed(
+        self,
+        data: bytes,
+        passthrough: Callable[[Connection, InitRequestPacket], tuple[str, int] | None]
+        | None = None,
+    ) -> list[PhotonPacket]:
         """Parse ``data``; answer the connection-level packets right here.
+
+        ``passthrough`` sees the Init before it is answered; if it names an
+        upstream server, parsing stops and :attr:`passthrough` is set: the
+        caller relays :attr:`preamble` and the rest of the stream there.
 
         Returns:
             The operations left for the server role to handle.
         """
+        self.last_received = time.monotonic()
+        if passthrough is None:
+            self.preamble = None
+        elif self.preamble is not None:
+            self.preamble += data
         self.parser.feed(data)
         operations: list[PhotonPacket] = []
         for packet in self.parser.parse(aes_key=self.aes_key):
             if isinstance(packet, InitRequestPacket):
                 self.app_id = packet.app_id
+                if passthrough is not None and self.preamble:
+                    self.passthrough = passthrough(self, packet)
+                    if self.passthrough is not None:
+                        return []
+                self.preamble = None
                 self.send(InitResponsePacket())
                 if packet.custom_init_data is not None:
                     operations.append(packet)  # The AuthOnce token.

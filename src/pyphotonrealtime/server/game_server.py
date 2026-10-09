@@ -158,7 +158,7 @@ class GameServer(RoleHandler):
             return
 
         if creates:
-            room = self._create_room(str(name.value), params)
+            room = self.create_room(str(name.value), params)
         assert room is not None  # noqa: S101 -- created or found above
         if rejoiner is not None and not rejoiner.is_active:
             actor = rejoiner
@@ -233,7 +233,16 @@ class GameServer(RoleHandler):
             return ErrorCode.GameFull, "room is full"
         return None
 
-    def _create_room(self, name: str, params: Parameters) -> Room:
+    def create_room(self, name: str, params: Parameters) -> Room:
+        """Create and register the room a client asked for; override to adjust it.
+
+        Subclasses can call ``super().create_room`` and then adjust the room
+        before its creator joins: cap MaxPlayers in ``room.properties``, force
+        ``room.player_ttl`` / ``room.empty_room_ttl``, set other properties.
+
+        Returns:
+            The new room, already in ``server.rooms``.
+        """
         room = Room(name, lobby=lobby_of(params))
         if (properties := params.get(ParameterKey.GameProperties)) is not None and (
             isinstance(properties, DictionaryParameterBase)
