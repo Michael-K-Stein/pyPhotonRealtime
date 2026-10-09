@@ -17,8 +17,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - name: Install pinned ruff
-        run: python -m pip install -e ".[lint]"
+      - name: Install pinned ruff, mypy and test deps
+        run: python -m pip install -e ".[lint,test]"
       - name: Ruff check
         run: python -m ruff check .
       - name: Ruff format check
