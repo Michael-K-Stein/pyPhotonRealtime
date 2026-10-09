@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pyphotonrealtime.peer import EventData
+    from pyphotonrealtime.realtime.lobby import FriendInfo, LobbyStatistics
     from pyphotonrealtime.realtime.player import Player
     from pyphotonrealtime.realtime.room import RoomInfo
     from pyphotonrealtime.realtime.state import DisconnectCause
@@ -40,7 +41,7 @@ class ConnectionCallbacks:
 class MatchmakingCallbacks:
     """Room creation and joining (``IMatchmakingCallbacks``)."""
 
-    def on_friend_list_update(self, friends: list[Any]) -> None:
+    def on_friend_list_update(self, friends: list[FriendInfo]) -> None:
         """The answer to ``op_find_friends`` arrived."""
 
     def on_created_room(self) -> None:
@@ -59,7 +60,7 @@ class MatchmakingCallbacks:
         """No room matched the random-join filter."""
 
     def on_left_room(self) -> None:
-        """Left the room; the client returns to the Master Server."""
+        """Left the room; on_connected_to_master follows once back on the Master."""
 
 
 class LobbyCallbacks:
@@ -74,7 +75,7 @@ class LobbyCallbacks:
     def on_room_list_update(self, rooms: list[RoomInfo]) -> None:
         """Rooms were added, changed or removed in the current lobby."""
 
-    def on_lobby_statistics_update(self, stats: list[Any]) -> None:
+    def on_lobby_statistics_update(self, stats: list[LobbyStatistics]) -> None:
         """Lobby statistics changed (requires ``enable_lobby_statistics``)."""
 
 

@@ -1,8 +1,13 @@
 """Option bundles for matchmaking and events."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pyphotonrealtime.realtime.lobby import TypedLobby
 
 
 class ReceiverGroup(IntEnum):
@@ -44,11 +49,13 @@ class EnterRoomParams:
     """Arguments for creating, joining or rejoining a room."""
 
     room_name: str | None = None
+    """None on create lets the server pick a unique name."""
     room_options: RoomOptions | None = None
-    lobby: str | None = None
+    lobby: TypedLobby | None = None
+    """Lobby to list a new room in; None uses the client's current lobby."""
     player_properties: dict[Any, Any] = field(default_factory=dict)
     expected_users: list[str] | None = None
-    rejoin: bool = False
+    """User ids to reserve slots for in the room."""
 
 
 @dataclass(slots=True, kw_only=True)

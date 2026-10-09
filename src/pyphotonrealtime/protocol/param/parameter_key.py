@@ -26,6 +26,9 @@ class ParameterKey(IntEnum):
     PlayerTTL = 0xEB  # 235
     HttpForward = 0xEA  # 234
     WebFlags = 0xEA  # 234
+    IsInactive = 0xE9  # 233
+    CheckUserOnJoin = 0xE8  # 232
+    ExpectedValues = 0xE7  # 231
     Address = 0xE6  # 230
     PeerCount = 0xE5  # 229
     GameCount = 0xE4  # 228
@@ -46,6 +49,7 @@ class ParameterKey(IntEnum):
     LobbyType = 0xD4  # 212
     LobbyStats = 0xD3  # 211
     Region = 0xD2  # 210
+    Plugins = 0xCC  # 204
     Nickname = 0xCA  # 202
     Flags = 0xC7  # 199
     CloudType = 0xC6  # 198
@@ -58,5 +62,17 @@ class ParameterKey(IntEnum):
     AuthMode = 0xBF  # 191
 
     ClientKey = 1
+    FindFriendsRequestList = 1  # Also the online flags in the FindFriends response.
+    FindFriendsResponseRoomIdList = 2
+
+    # Aliases sharing a code with a key above, named as in the SDK.
+    JoinMode = 0xD7  # 215, CreateIfNotExists
+    MatchMakingType = 0xDF  # 223, Position
+    PlayerProperties = 0xF9  # 249, ActorProperties
+    ActorList = 0xFC  # 252, Actors
+    CleanupCacheOnLeave = 0xF1  # 241, DeleteCacheOnLeave
+    PublishUserId = 0xEF  # 239, GroupsForRemove
+    Add = 0xEE  # 238, GroupsForAdd: expected users
+    SqlLobbyFilter = 0xF5  # 245, Data
 
     Null = 0

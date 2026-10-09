@@ -2,6 +2,12 @@
 
 from typing import Any
 
+from pyphotonrealtime.protocol.property_keys import ActorPropertyKey
+
+_PLAYER_NAME = ActorPropertyKey.PlayerName.value.value
+_IS_INACTIVE = ActorPropertyKey.IsInactive.value.value
+_USER_ID = ActorPropertyKey.UserId.value.value
+
 
 class Player:
     """A player in the current room; ``is_local`` marks this client."""
@@ -16,6 +22,25 @@ class Player:
         self.user_id: str | None = None
         self.is_inactive = False
         self.custom_properties: dict[Any, Any] = {}
+
+    def update(self, properties: dict[Any, Any]) -> None:
+        """Apply a (partial) property set as sent by the server.
+
+        Byte keys are well-known properties; string keys are custom ones,
+        where a ``None`` value deletes the key.
+        """
+        for key, value in properties.items():
+            if isinstance(key, str):
+                if value is None:
+                    self.custom_properties.pop(key, None)
+                else:
+                    self.custom_properties[key] = value
+            elif key == _PLAYER_NAME:
+                self.nick_name = str(value)
+            elif key == _IS_INACTIVE:
+                self.is_inactive = bool(value)
+            elif key == _USER_ID:
+                self.user_id = str(value)
 
     def set_custom_properties(self, properties: dict[Any, Any]) -> bool:
         """Merge ``properties`` into this player's properties on the server.

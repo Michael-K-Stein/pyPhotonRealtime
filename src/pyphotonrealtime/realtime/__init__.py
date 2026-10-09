@@ -15,6 +15,14 @@ from pyphotonrealtime.realtime.callbacks import (
 )
 from pyphotonrealtime.realtime.client import RealtimeClient
 from pyphotonrealtime.realtime.error_code import ErrorCode
+from pyphotonrealtime.realtime.lobby import (
+    FriendInfo,
+    JoinMode,
+    LobbyStatistics,
+    LobbyType,
+    MatchmakingMode,
+    TypedLobby,
+)
 from pyphotonrealtime.realtime.options import (
     EnterRoomParams,
     EventCaching,
@@ -41,9 +49,14 @@ __all__ = [
     "EnterRoomParams",
     "ErrorCode",
     "EventCaching",
+    "FriendInfo",
     "InRoomCallbacks",
+    "JoinMode",
     "LobbyCallbacks",
+    "LobbyStatistics",
+    "LobbyType",
     "MatchmakingCallbacks",
+    "MatchmakingMode",
     "OnEventCallback",
     "Player",
     "RaiseEventArgs",
@@ -56,4 +69,5 @@ __all__ = [
     "RoomOptions",
     "SendOptions",
     "ServerType",
+    "TypedLobby",
 ]
