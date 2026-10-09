@@ -1,5 +1,33 @@
-# Formatting is enforced in CI (`ruff format --check .`). Lint is limited to
-# correctness rules there (see .github/workflows/docker-image.yml) because the
-# default rule set still fails on the existing code.
-# Keep the ruff pin in CI in sync with the version used locally.
+# Strict: every rule is on. Keep the ruff pin in pyproject.toml (`lint` extra)
+# in sync with CI. Opt out per line with `# noqa: XXX` plus a reason, not here.
+target-version = "py312"
 line-length = 88
+src = ["src", "tests"]
+
+[lint]
+select = ["ALL"]
+ignore = [
+    # Conflict with the formatter (https://docs.astral.sh/ruff/formatter/#conflicting-lint-rules).
+    "COM812",
+    "ISC001",
+    # Mutually exclusive docstring styles; we use D211 + D212.
+    "D203",
+    "D213",
+]
+
+[lint.per-file-ignores]
+"tests/**" = [
+    "S101",    # assert is how pytest works
+    "D",       # test names are the documentation
+    "PLR2004", # magic values are fine in assertions
+    "SLF001",  # tests may poke private members
+]
+
+[lint.pydocstyle]
+convention = "google"
+
+[lint.flake8-type-checking]
+strict = true
+
+[format]
+docstring-code-format = true
