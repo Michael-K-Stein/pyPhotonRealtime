@@ -17,6 +17,7 @@ from pyphotonrealtime.protocol.custom_types import (
     unregister_type,
 )
 from pyphotonrealtime.protocol.packet.factory import PacketFactory
+from pyphotonrealtime.protocol.packet.init import InitRequestPacket
 from pyphotonrealtime.protocol.packet.operation_packet import PhotonOperationPacket
 from pyphotonrealtime.protocol.packet.packet_stream import PhotonStreamParser
 from pyphotonrealtime.protocol.param.bool_param import BooleanParameter
@@ -237,6 +238,44 @@ def test_dictionary_header_types_values_once() -> None:
     )
     # Key type String, value type CompressedInt, one entry: "a" -> zig-zag 1.
     assert write_value(dictionary).hex() == "14070901016102"
+
+
+# Captured from the C++ SDK's demo_typeSupport (Dictionary<int, JString>[3]).
+CPP_DICTIONARY_ARRAY = "54090703010001300102013101040132"
+
+
+def test_dictionary_array_puts_the_type_before_the_count() -> None:
+    value = _decode(bytes.fromhex(CPP_DICTIONARY_ARRAY))
+    assert to_python(value) == [{0: "0"}, {1: "1"}, {2: "2"}]
+    assert write_value(value).hex() == CPP_DICTIONARY_ARRAY
+
+
+def test_cpp_array_values_in_a_typed_dictionary() -> None:
+    # Dictionary<int, int[][]> {1: [[10]]}: the C++ SDK declares the value type
+    # (40 49), then repeats it in each value anyway (40 01 49 01 14).
+    value = _decode(bytes.fromhex("1409404901024001490114"))
+    assert to_python(value) == {1: [[10]]}
+    # Sent on with object values, which every SDK reads back.
+    assert write_value(value).hex() == "14090001024001490114"
+
+
+def test_http_init_captured_from_cpp_sdk() -> None:
+    # On the Master and Game Server hop after AuthOnce, the C++ SDK sends its
+    # init as an HTTP request, the token in the body.
+    token = "fe1ecba4e811aa0db88c37a8b37883b3"  # noqa: S105 -- as captured
+    request = (
+        b"POST /?init=&app=6f869876bfbc491e8fff4210c966f145&clientversion=5.0.14.0"
+        b"&protocol=GpBinaryV18&sid=17 HTTP/1.1\r\nHost: 127.0.0.1:10890\r\n"
+        b"Content-Length: 34\r\n\r\n\x07\x20" + token.encode()
+    )
+    parser = PhotonStreamParser()
+    parser.feed(b"\xfb" + struct.pack(">I", len(request) + 7) + b"\x00\x01" + request)
+    (packet,) = list(parser.parse())
+    assert isinstance(packet, InitRequestPacket)
+    assert packet.app_id == "6f869876bfbc491e8fff4210c966f145"
+    assert packet.sdk_version == "5.0.14.0"
+    assert packet.custom_init_data == StringParameter(token)
+    assert parser.protocol == SerializationProtocol.V18
 
 
 def test_unknown_type_code_is_an_error() -> None:

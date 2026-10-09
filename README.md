@@ -58,6 +58,7 @@ while True:
 | `pyphotonrealtime.transport` | Transports: TCP, UDP (reliable/unreliable channels, fragmentation), WebSocket(s) |
 | `pyphotonrealtime.peer` | `PhotonPeer`: one connection, the service loop, keep-alive, encryption |
 | `pyphotonrealtime.realtime` | `RealtimeClient`: Name/Master/Game server workflow, rooms, players, callbacks |
+| `pyphotonrealtime.server` | `PhotonServer`: a self-hosted Name, Master and Game Server over TCP |
 
 ## Protocols
 
@@ -82,6 +83,32 @@ register_type(
 client.op_raise_event(1, {"at": Vector2(1, 2)})  # arrives as a Vector2
 ```
 
+## Self-hosted server
+
+`PhotonServer` runs a Name, Master and Game Server in one process, over TCP, with
+rooms in memory: a local stand-in for Photon Cloud, for tests and offline play.
+Official Photon clients connect to it too (the C++ SDK demos do, see Testing).
+
+```python
+from pyphotonrealtime.server import PhotonServer
+
+with PhotonServer() as server:  # Name Server on 127.0.0.1:4533, any app id
+    client.connect_using_settings(
+        AppSettings(
+            app_id_realtime="<any app id>",
+            name_server=server.host,
+            name_server_port=server.name_server_port,
+            fixed_region="local",
+        )
+    )
+```
+
+It covers authentication (including AuthOnce), regions, lobbies and room lists,
+create/join/random join, events (receivers, targets, interest groups, the room
+cache), room and player properties with compare-and-swap, master client handover
+and player TTLs. Not yet: UDP and WebSockets, SQL lobby filters, plugins and
+WebHooks.
+
 ## Development
 
 ```bash
@@ -91,6 +118,7 @@ python -m ruff format --check .
 python -m mypy                    # strict
 python -m pytest -q               # unit tests (e2e excluded)
 PHOTON_APP_ID=... python -m pytest -m e2e   # live Photon Cloud, opt-in
+python -m pytest -m e2e tests/e2e/test_sdk_demos_local.py  # C++ demos vs PhotonServer
 ```
 
 ## Testing
@@ -99,4 +127,12 @@ Unit tests check that the protocol layer agrees with itself (round trips, framin
 That doesn't prove it agrees with Photon. The `e2e` tests in `tests/e2e/` do that
 against the real Photon Cloud. They need a Realtime app id in `PHOTON_APP_ID`, and
 CI runs them nightly and on manual dispatch, never on PRs.
+
+`tests/e2e/test_sdk_demos*.py` run the official Photon C++ SDK's demos (Windows,
+MSVC and the SDK in `sdks/` or `$PHOTON_CPP_SDK`; they skip otherwise). Against
+Photon Cloud, our client and `demo_loadBalancing` share a room. Against
+`PhotonServer` they need no app id: the demos' local builds connect over TCP to our
+Name Server, and pairs of demos (`demo_loadBalancing`, `demo_typeSupport`,
+`demo_particle`) talk to each other through it, which tests the server side of the
+protocol against the real C++ client.
 ```

@@ -72,6 +72,16 @@ separate layer and doesn't change the core.
 - [x] WebSocket(s) transport (WSS uses TLS instead of payload encryption, like the SDKs)
 - [x] e2e: every test over TCP, UDP and WSS; a UDP/1.6 client and a WSS/1.8 client share a room
 
+### Self-hosted server (#5)
+- [x] `PhotonServer`: Name, Master and Game Server over TCP, rooms in memory
+- [x] Name Server: regions, `Authenticate` / `AuthOnce` (incl. the C++ SDK's HTTP-style
+      init carrying the token)
+- [x] Master Server: lobbies, room lists, create / join / random join, Game Server handoff
+- [x] Game Server: rooms, players, join/leave events, `RaiseEvent` routing, room cache,
+      interest groups, properties with CAS, master client, player TTL
+- [x] C++ SDK demos (local builds over TCP) authenticate, and talk to each other through it
+- [ ] UDP and WebSocket listeners (the demos default to UDP; local builds use TCP)
+
 ### M6: Ergonomics and release
 - [ ] `asyncio` facade (`AsyncRealtimeClient`: awaitable connect/join, async event iterator)
 - [ ] Plain Python values in the public API (`dict`/`int`/`str`) instead of `*Parameter` wrappers;

@@ -1,24 +1,23 @@
 """Interop tests against the official C++ SDK's ``demo_loadBalancing``.
 
-Our client and the real Photon C++ client meet in the same room on Photon
-Cloud, so each side checks that the other's traffic is well-formed: the demo
-sees our join, we see the demo's player and its events, and vice versa.
+Our client and the real Photon C++ client meet in the same room, so each side
+checks that the other's traffic is well-formed: the demo sees our join, we see
+the demo's player and its events, and vice versa.
 
-Same opt-in as the other e2e tests (``PHOTON_APP_ID``), plus Windows, MSVC
-and the Photon Windows C++ SDK (see ``sdk_demos/build.py``); they skip when
-any of those is missing. The demo is built on first use into ``build/``.
+Every test runs twice: on Photon Cloud (needs ``PHOTON_APP_ID``) and on a
+self-hosted ``PhotonServer``, which the demo's local build (TCP, our Name
+Server) dials instead. Both also need Windows, MSVC and the Photon Windows C++
+SDK (see ``sdk_demos/build.py``) and skip without them. Demos are built on
+first use into ``build/``.
 """
 
 from __future__ import annotations
 
 import os
-import queue
-import re
-import subprocess
-import threading
 import time
 import uuid
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -26,83 +25,63 @@ from pyphotonrealtime import AppSettings, ClientState, RealtimeClient
 from pyphotonrealtime.protocol.param.parameter_key import ParameterKey
 from pyphotonrealtime.realtime import EnterRoomParams, RoomOptions
 from pyphotonrealtime.realtime.callbacks import InRoomCallbacks, OnEventCallback
+from pyphotonrealtime.server import PhotonServer
 
 from .sdk_demos.build import DemoUnavailableError, build_demo
+from .sdk_demos.process import TIMEOUT_SECONDS, DemoProcess
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
-    from pathlib import Path
 
     from pyphotonrealtime.peer import EventData
     from pyphotonrealtime.realtime.player import Player
 
 APP_ID = os.environ.get("PHOTON_APP_ID", "")
+LOCAL_APP_ID = "00000000-0000-0000-0000-000000000000"
+"""Any app id will do for the self-hosted server."""
 # demo_loadBalancing hardcodes both: it picks "eu" and sends app version "1.0".
 DEMO_REGION = "eu"
 DEMO_APP_VERSION = "1.0"
 DEMO_NICK_NAME = "Windows"
 DEMO_EVENT_CODE = 0
-TIMEOUT_SECONDS = 20.0
 
-pytestmark = [
-    pytest.mark.e2e,
-    pytest.mark.skipif(not APP_ID, reason="PHOTON_APP_ID not set"),
-]
+pytestmark = pytest.mark.e2e
 
 
-class DemoProcess:
-    """The demo running as a subprocess, driven by its menu keys."""
+@dataclass(slots=True)
+class Target:
+    """Where the demo and our client meet: Photon Cloud or a local server."""
 
-    def __init__(self, exe: Path) -> None:
-        self._proc = subprocess.Popen(  # noqa: S603 -- our own build output
-            [str(exe)],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            env={**os.environ, "PHOTON_APP_ID": APP_ID},
+    app_id: str
+    local: bool = False
+    settings: dict[str, Any] = field(default_factory=dict)
+    """Extra ``AppSettings`` fields for our client."""
+    env: dict[str, str] = field(default_factory=dict)
+    """Extra environment for the demo."""
+
+
+@pytest.fixture(params=["cloud", "local"])
+def target(request: pytest.FixtureRequest) -> Iterator[Target]:
+    if request.param == "cloud":
+        if not APP_ID:
+            pytest.skip("PHOTON_APP_ID not set")
+        yield Target(APP_ID)
+        return
+    with PhotonServer(
+        name_server_port=0,
+        master_server_port=0,
+        game_server_port=0,
+        regions=(DEMO_REGION,),
+    ) as server:
+        yield Target(
+            LOCAL_APP_ID,
+            local=True,
+            settings={
+                "name_server": server.host,
+                "name_server_port": server.name_server_port,
+            },
+            env={"PHOTON_SERVER_ADDRESS": server.name_server_address},
         )
-        self.output = ""
-        self._chunks: queue.Queue[bytes] = queue.Queue()
-        threading.Thread(target=self._pump, daemon=True).start()
-
-    def _pump(self) -> None:
-        assert self._proc.stdout is not None
-        while chunk := os.read(self._proc.stdout.fileno(), 4096):
-            self._chunks.put(chunk)
-
-    def press(self, key: str) -> None:
-        assert self._proc.stdin is not None
-        self._proc.stdin.write(f"{key}\n".encode())
-        self._proc.stdin.flush()
-
-    def expect(
-        self, pattern: str, client: RealtimeClient | None = None
-    ) -> re.Match[str]:
-        """Wait for ``pattern`` in the demo's output, servicing ``client``.
-
-        Returns:
-            The first match.
-        """
-        deadline = time.monotonic() + TIMEOUT_SECONDS
-        while not (match := re.search(pattern, self.output)):
-            if time.monotonic() > deadline:
-                pytest.fail(f"demo never printed {pattern!r}; output:\n{self.output}")
-            if client is not None:
-                client.service()
-            try:
-                chunk = self._chunks.get(timeout=1 / 30)
-            except queue.Empty:
-                continue
-            self.output += chunk.decode("utf-8", "replace")
-        return match
-
-    def close(self) -> None:
-        if self._proc.poll() is None:
-            self.press("0")
-            try:
-                self._proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._proc.kill()
 
 
 class _Recorder(InRoomCallbacks, OnEventCallback):
@@ -121,32 +100,29 @@ class _Recorder(InRoomCallbacks, OnEventCallback):
         self.left.append(player)
 
 
-@pytest.fixture(scope="module")
-def demo_exe() -> Path:
+@pytest.fixture
+def demo(target: Target) -> Iterator[DemoProcess]:
     try:
-        return build_demo("demo_loadBalancing")
+        exe = build_demo("demo_loadBalancing", local=target.local)
     except DemoUnavailableError as exc:
         pytest.skip(str(exc))
-
-
-@pytest.fixture
-def demo(demo_exe: Path) -> Iterator[DemoProcess]:
-    process = DemoProcess(demo_exe)
+    process = DemoProcess(exe, {"PHOTON_APP_ID": target.app_id, **target.env})
     yield process
     process.close()
 
 
 @pytest.fixture
-def client() -> Iterator[tuple[RealtimeClient, _Recorder]]:
+def client(target: Target) -> Iterator[tuple[RealtimeClient, _Recorder]]:
     client = RealtimeClient()
     client.local_player.nick_name = "python"
     recorder = _Recorder()
     client.add_callback_target(recorder)
     client.connect_using_settings(
         AppSettings(
-            app_id_realtime=APP_ID,
+            app_id_realtime=target.app_id,
             app_version=DEMO_APP_VERSION,
             fixed_region=DEMO_REGION,
+            **target.settings,
         )
     )
     _service_until(client, lambda: client.state == ClientState.ConnectedToMasterServer)
