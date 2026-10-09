@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from pyphotonrealtime.peer import EventData
+    from pyphotonrealtime.peer import EventData, OperationResponse
     from pyphotonrealtime.realtime.lobby import FriendInfo, LobbyStatistics
     from pyphotonrealtime.realtime.player import Player
     from pyphotonrealtime.realtime.room import RoomInfo
@@ -107,10 +107,18 @@ class OnEventCallback:
         """Any event arrived, including custom events from ``op_raise_event``."""
 
 
+class OperationResponseCallback:
+    """Raw access to every operation response, e.g. for ``op_custom``."""
+
+    def on_operation_response(self, response: OperationResponse) -> None:
+        """The server answered an operation."""
+
+
 type CallbackTarget = (
     ConnectionCallbacks
     | MatchmakingCallbacks
     | LobbyCallbacks
     | InRoomCallbacks
     | OnEventCallback
+    | OperationResponseCallback
 )

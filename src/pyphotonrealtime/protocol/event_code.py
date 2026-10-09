@@ -42,6 +42,13 @@ CUSTOM_EVENT_CODE_MAX = 200
 
 
 class EventCode(IntEnum):
+    # In-room events from the Game Server.
+    Join = 0xFF  # 255
+    Leave = 0xFE  # 254
+    PropertiesChanged = 0xFD  # 253
+    ErrorInfo = 0xFB  # 251
+    CacheSliceChanged = 0xFA  # 250
+
     GameList = 0xE6  # 230
     GameListUpdate = 0xE5
     QueueState = 0xE4
@@ -50,7 +57,7 @@ class EventCode(IntEnum):
     LobbyStats = 0xE0
     AuthEvent = 0xDF
 
-    Event = 0xFF
+    Event = 0xFF  # Alias of Join.
 
     @classmethod
     def _missing_(cls, value: object) -> int:

@@ -55,12 +55,12 @@ separate layer and doesn't change the core.
 - [x] `OpFindFriends`, expected users, SQL lobby filters
 - [x] e2e: create, join and leave a room on Photon Cloud
 
-### M4: In-room
-- [ ] Join/Leave/PropertiesChanged events, then update `Room`/`Player` and fire callbacks
-- [ ] `op_raise_event` (receivers, target actors, caching, interest groups)
-- [ ] Set room/actor properties, with expected-properties CAS
-- [ ] Master client switching; `op_custom` escape hatch
-- [ ] e2e: two clients in one room exchange events and properties
+### M4: In-room (done)
+- [x] Join/Leave/PropertiesChanged events, then update `Room`/`Player` and fire callbacks
+- [x] `op_raise_event` (receivers, target actors, caching, interest groups)
+- [x] Set room/actor properties, with expected-properties CAS
+- [x] Master client switching; `op_custom` escape hatch
+- [x] e2e: two clients in one room exchange events and properties
 
 ### M5: Protocol completeness
 - [ ] Protocol 1.8 (`SerializationProtocol.V18`), the default in v5+ SDKs; audit what's implemented today

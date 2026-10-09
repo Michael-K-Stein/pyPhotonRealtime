@@ -16,13 +16,15 @@ import dataclasses
 from typing import TYPE_CHECKING, Any, cast
 
 from pyphotonrealtime.peer import PeerState, PhotonPeer, StatusCode
-from pyphotonrealtime.protocol.event_code import EventCode
+from pyphotonrealtime.protocol.event_code import CUSTOM_EVENT_CODE_MAX, EventCode
 from pyphotonrealtime.protocol.operation_code import OperationCode
 from pyphotonrealtime.protocol.param.bool_param import BooleanParameter
 from pyphotonrealtime.protocol.param.int8_param import Int8Parameter
 from pyphotonrealtime.protocol.param.int8_slice_param import Int8SliceParameter
 from pyphotonrealtime.protocol.param.int32_param import Int32Parameter
 from pyphotonrealtime.protocol.param.parameter_key import ParameterKey
+from pyphotonrealtime.protocol.param.parameter_type import ParameterType
+from pyphotonrealtime.protocol.param.slice_param import SliceParameter
 from pyphotonrealtime.protocol.param.string_param import StringParameter
 from pyphotonrealtime.protocol.property_keys import ActorPropertyKey, GamePropertyKey
 from pyphotonrealtime.realtime._convert import (
@@ -45,7 +47,13 @@ from pyphotonrealtime.realtime.lobby import (
     MatchmakingMode,
     TypedLobby,
 )
-from pyphotonrealtime.realtime.options import EnterRoomParams, RoomOptions
+from pyphotonrealtime.realtime.options import (
+    EnterRoomParams,
+    EventCaching,
+    RaiseEventArgs,
+    ReceiverGroup,
+    RoomOptions,
+)
 from pyphotonrealtime.realtime.player import Player
 from pyphotonrealtime.realtime.region import Region, RegionPinger
 from pyphotonrealtime.realtime.room import Room, RoomInfo
@@ -56,7 +64,7 @@ if TYPE_CHECKING:
     from pyphotonrealtime.peer import EventData, OperationResponse, Parameters
     from pyphotonrealtime.protocol.param.base import ParameterBase
     from pyphotonrealtime.realtime.callbacks import CallbackTarget
-    from pyphotonrealtime.realtime.options import RaiseEventArgs, SendOptions
+    from pyphotonrealtime.realtime.options import SendOptions
     from pyphotonrealtime.realtime.settings import AppSettings
     from pyphotonrealtime.transport import Transport
 
@@ -136,7 +144,7 @@ class RealtimeClient:
         """Set before connecting to send a user id or use custom authentication."""
 
         self.peer = PhotonPeer(listener=self, transport=transport)
-        self.local_player = Player(actor_number=-1, is_local=True)
+        self.local_player = Player(actor_number=-1, is_local=True, client=self)
         self.current_room: Room | None = None
         self.room_list: dict[str, RoomInfo] = {}
         """Rooms listed in the current lobby, by name."""
@@ -513,18 +521,55 @@ class RealtimeClient:
     ) -> bool:
         """Send a custom event (codes 1-199) to other players in the room.
 
+        Receivers get it as an ``on_event`` with ``event.code == event_code``;
+        ``event.custom_data`` is ``content`` and ``event.sender`` this client.
+
+        Args:
+            event_code: The event code, 1-199.
+            content: Any value ``to_param`` accepts (dicts, lists, scalars).
+            args: Receivers, interest group and caching; defaults to others.
+            send_options: Delivery options; only ``encrypt`` applies to TCP.
+
         Returns:
             Whether the operation was queued.
+
+        Raises:
+            ValueError: ``event_code`` is outside 1-199.
         """
-        raise NotImplementedError
+        if not 0 < event_code < CUSTOM_EVENT_CODE_MAX:
+            msg = f"Custom event codes are 1-199, got {event_code}"
+            raise ValueError(msg)
+        args = args or RaiseEventArgs()
+        params: Parameters = {
+            ParameterKey.Code: Int8Parameter(event_code),
+            ParameterKey.Data: to_param(content),
+        }
+        if args.caching != EventCaching.DoNotCache:
+            params[ParameterKey.Cache] = Int8Parameter(args.caching)
+        # Like the SDKs: explicit targets win over a group, a group over receivers.
+        if args.target_actors is not None:
+            params[ParameterKey.ActorList] = _int_array(args.target_actors)
+        elif args.interest_group:
+            params[ParameterKey.Group] = Int8Parameter(args.interest_group)
+        elif args.receivers != ReceiverGroup.Others:
+            params[ParameterKey.ReceiverGroup] = Int8Parameter(args.receivers)
+        return self._send_in_room(OperationCode.RaiseEvent, params, send_options)
 
     def op_change_groups(self, remove: list[int] | None, add: list[int] | None) -> bool:
         """Change which interest groups this client receives events from.
 
+        ``None`` leaves that side unchanged; an empty list means all groups.
+        The server removes before it adds.
+
         Returns:
             Whether the operation was queued.
         """
-        raise NotImplementedError
+        params: Parameters = {}
+        if remove is not None:
+            params[ParameterKey.Remove] = Int8SliceParameter(bytes(remove))
+        if add is not None:
+            params[ParameterKey.Add] = Int8SliceParameter(bytes(add))
+        return self._send_in_room(OperationCode.ChangeGroups, params)
 
     def op_set_properties_of_room(
         self,
@@ -533,20 +578,46 @@ class RealtimeClient:
     ) -> bool:
         """Set room properties, optionally only if ``expected`` still holds.
 
+        String keys are custom properties (a ``None`` value deletes one); use an
+        ``Int8Parameter`` key for a well-known one, e.g. ``IsOpen``. Without
+        ``expected`` the local room updates right away. With it, the server
+        applies the change only if every expected value matches (compare and
+        swap), and the room updates when the ``PropertiesChanged`` event arrives.
+
         Returns:
             Whether the operation was queued.
         """
-        raise NotImplementedError
+        room = self.current_room
+        if room is None or not properties:
+            return False
+        if not self._set_properties(properties, expected):
+            return False
+        if not expected:
+            room.update(to_python(to_hashtable(properties)))
+        return True
 
     def op_set_properties_of_actor(
-        self, actor_number: int, properties: dict[Any, Any]
+        self,
+        actor_number: int,
+        properties: dict[Any, Any],
+        expected: dict[Any, Any] | None = None,
     ) -> bool:
-        """Set a player's custom properties.
+        """Set a player's properties, optionally only if ``expected`` still holds.
+
+        Keys and ``expected`` work as in :meth:`op_set_properties_of_room`.
 
         Returns:
             Whether the operation was queued.
         """
-        raise NotImplementedError
+        room = self.current_room
+        player = room.players.get(actor_number) if room is not None else None
+        if player is None or not properties:
+            return False
+        if not self._set_properties(properties, expected, actor_number=actor_number):
+            return False
+        if not expected:
+            player.update(to_python(to_hashtable(properties)))
+        return True
 
     def op_custom(
         self,
@@ -556,10 +627,46 @@ class RealtimeClient:
     ) -> bool:
         """Send any operation; the escape hatch for game-specific ops.
 
+        Values are converted with ``to_param``. The response goes to callback
+        targets implementing ``OperationResponseCallback``.
+
         Returns:
             Whether the operation was queued.
         """
-        raise NotImplementedError
+        encrypt = send_options is not None and send_options.encrypt
+        return self.peer.send_operation(
+            operation_code,
+            {key: to_param(value) for key, value in parameters.items()},
+            encrypt=encrypt,
+        )
+
+    def _send_in_room(
+        self,
+        operation: OperationCode,
+        params: Parameters,
+        send_options: SendOptions | None = None,
+    ) -> bool:
+        if not self.in_room:
+            return False
+        encrypt = send_options is not None and send_options.encrypt
+        return self.peer.send_operation(operation, params, encrypt=encrypt)
+
+    def _set_properties(
+        self,
+        properties: dict[Any, Any],
+        expected: dict[Any, Any] | None,
+        *,
+        actor_number: int | None = None,
+    ) -> bool:
+        params: Parameters = {
+            ParameterKey.Properties: to_hashtable(properties),
+            ParameterKey.Broadcast: BooleanParameter(value=True),
+        }
+        if actor_number is not None:
+            params[ParameterKey.ActorNr] = Int32Parameter(actor_number)
+        if expected:
+            params[ParameterKey.ExpectedValues] = to_hashtable(expected)
+        return self._send_in_room(OperationCode.SetProperties, params)
 
     # -- PeerListener -----------------------------------------------------
 
@@ -613,6 +720,7 @@ class RealtimeClient:
                 self._leave_game_server()
             case _:
                 pass
+        self._emit("on_operation_response", response)
 
     def on_event(self, event: EventData) -> None:
         """Update room state from built-in events, then forward to targets."""
@@ -625,6 +733,12 @@ class RealtimeClient:
                 self._on_lobby_stats(event.parameters)
             case EventCode.AppStats:
                 self._on_app_stats(event.parameters)
+            case EventCode.Join if self.current_room is not None:
+                self._on_join_event(self.current_room, event.parameters)
+            case EventCode.Leave if self.current_room is not None:
+                self._on_leave_event(self.current_room, event.parameters)
+            case EventCode.PropertiesChanged if self.current_room is not None:
+                self._on_properties_changed(self.current_room, event.parameters)
             case _:
                 pass
         self._emit("on_event", event)
@@ -950,7 +1064,7 @@ class RealtimeClient:
             return
 
         params = response.parameters
-        room = Room(enter.params.room_name or "")
+        room = Room(enter.params.room_name or "", client=self)
         if (properties := params.get(ParameterKey.GameProperties)) is not None:
             room.update(to_python(properties))
         if (actor_nr := params.get(ParameterKey.ActorNr)) is not None:
@@ -959,12 +1073,12 @@ class RealtimeClient:
         room.players[self.local_player.actor_number] = self.local_player
         if (actors := params.get(ParameterKey.PlayerProperties)) is not None:
             for number, properties in to_python(actors).items():
-                player = room.players.setdefault(number, Player(int(number)))
+                player = self._player(room, int(number))
                 if not player.is_local:
                     player.update(properties)
         if (actor_list := params.get(ParameterKey.ActorList)) is not None:
             for number in to_python(actor_list):
-                room.players.setdefault(number, Player(int(number)))
+                self._player(room, int(number))
 
         self.current_room = room
         self._last_room = room.name
@@ -975,6 +1089,80 @@ class RealtimeClient:
         ):
             self._emit("on_created_room")
         self._emit("on_joined_room")
+
+    def _player(self, room: Room, actor_number: int) -> Player:
+        """Return the room's player ``actor_number``, adding it if unknown."""
+        if (player := room.players.get(actor_number)) is None:
+            player = room.players[actor_number] = Player(actor_number, client=self)
+        return player
+
+    # -- in-room events (Game Server) -------------------------------------------
+
+    def _on_join_event(self, room: Room, params: Parameters) -> None:
+        actor = params.get(ParameterKey.ActorNr)
+        if actor is None:
+            return
+        number = int(actor.value)
+        is_new = number not in room.players
+        player = self._player(room, number)
+        if (actor_list := params.get(ParameterKey.ActorList)) is not None:
+            for other in to_python(actor_list):
+                self._player(room, int(other))
+        if player.is_local:
+            return  # Our own join; the operation response already set us up.
+        was_inactive = player.is_inactive
+        player.is_inactive = False
+        if (properties := params.get(ParameterKey.PlayerProperties)) is not None:
+            player.update(to_python(properties))
+        if is_new or was_inactive:
+            self._emit("on_player_entered_room", player)
+
+    def _on_leave_event(self, room: Room, params: Parameters) -> None:
+        actor = params.get(ParameterKey.ActorNr)
+        if actor is None:
+            return
+        number = int(actor.value)
+        inactive = params.get(ParameterKey.IsInactive)
+        if (player := room.players.get(number)) is not None:
+            if inactive is not None and inactive.value:
+                player.is_inactive = True
+            else:
+                del room.players[number]
+            self._emit("on_player_left_room", player)
+
+        new_master = params.get(ParameterKey.MasterClientId)
+        if new_master is not None and int(new_master.value):
+            self._switch_master_client(room, int(new_master.value))
+        elif number == room.master_client_id:
+            # Not announced by the server: the lowest active actor takes over.
+            active = [n for n, p in room.players.items() if not p.is_inactive]
+            if active:
+                self._switch_master_client(room, min(active))
+
+    def _on_properties_changed(self, room: Room, params: Parameters) -> None:
+        properties = params.get(ParameterKey.Properties)
+        if properties is None:
+            return
+        changed: dict[Any, Any] = to_python(properties)
+        target = params.get(ParameterKey.TargetActorNr)
+        if target is not None and int(target.value):
+            player = self._player(room, int(target.value))
+            player.update(changed)
+            self._emit("on_player_properties_update", player, changed)
+            return
+        old_master = room.master_client_id
+        room.update(changed)
+        self._emit("on_room_properties_update", changed)
+        if room.master_client_id != old_master:
+            new_master, room.master_client_id = room.master_client_id, old_master
+            self._switch_master_client(room, new_master)
+
+    def _switch_master_client(self, room: Room, actor_number: int) -> None:
+        if actor_number == room.master_client_id:
+            return
+        room.master_client_id = actor_number
+        if (player := room.players.get(actor_number)) is not None:
+            self._emit("on_master_client_switched", player)
 
     def _emit_enter_failed(
         self, enter: _EnterRoom, response: OperationResponse
@@ -1023,6 +1211,12 @@ class RealtimeClient:
             self._pinger = None
         self.state = ClientState.Disconnected
         self._emit("on_disconnected", self.disconnect_cause)
+
+
+def _int_array(values: list[int]) -> SliceParameter[Int32Parameter]:
+    return SliceParameter(
+        [Int32Parameter(v) for v in values], element_type=ParameterType.Int32Type
+    )
 
 
 def _lobby_params(lobby: TypedLobby) -> Parameters:

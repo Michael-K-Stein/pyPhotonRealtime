@@ -1,8 +1,13 @@
 """Players (actors) in a room."""
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from pyphotonrealtime.protocol.property_keys import ActorPropertyKey
+
+if TYPE_CHECKING:
+    from pyphotonrealtime.realtime.client import RealtimeClient
 
 _PLAYER_NAME = ActorPropertyKey.PlayerName.value.value
 _IS_INACTIVE = ActorPropertyKey.IsInactive.value.value
@@ -13,10 +18,16 @@ class Player:
     """A player in the current room; ``is_local`` marks this client."""
 
     def __init__(
-        self, actor_number: int, nick_name: str = "", *, is_local: bool = False
+        self,
+        actor_number: int,
+        nick_name: str = "",
+        *,
+        is_local: bool = False,
+        client: RealtimeClient | None = None,
     ) -> None:
-        """Create a player with no custom properties."""
+        """Create a player with no custom properties, owned by ``client``."""
         self.actor_number = actor_number
+        self.client = client
         self.nick_name = nick_name
         self.is_local = is_local
         self.user_id: str | None = None
@@ -42,13 +53,23 @@ class Player:
             elif key == _USER_ID:
                 self.user_id = str(value)
 
-    def set_custom_properties(self, properties: dict[Any, Any]) -> bool:
+    def set_custom_properties(
+        self,
+        properties: dict[Any, Any],
+        expected: dict[Any, Any] | None = None,
+    ) -> bool:
         """Merge ``properties`` into this player's properties on the server.
+
+        See :meth:`RealtimeClient.op_set_properties_of_actor`.
 
         Returns:
             Whether the operation was queued.
         """
-        raise NotImplementedError
+        if self.client is None:
+            return False
+        return self.client.op_set_properties_of_actor(
+            self.actor_number, properties, expected
+        )
 
     def __repr__(self) -> str:
         """Short debug form: actor number and nickname."""

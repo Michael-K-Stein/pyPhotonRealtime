@@ -12,6 +12,7 @@ from pyphotonrealtime.realtime.callbacks import (
     LobbyCallbacks,
     MatchmakingCallbacks,
     OnEventCallback,
+    OperationResponseCallback,
 )
 from pyphotonrealtime.realtime.client import RealtimeClient
 from pyphotonrealtime.realtime.error_code import ErrorCode
@@ -58,6 +59,7 @@ __all__ = [
     "MatchmakingCallbacks",
     "MatchmakingMode",
     "OnEventCallback",
+    "OperationResponseCallback",
     "Player",
     "RaiseEventArgs",
     "RealtimeClient",

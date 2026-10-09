@@ -29,6 +29,7 @@ from pyphotonrealtime.protocol.packet.keep_alive import (
 from pyphotonrealtime.protocol.packet.key_exchange import InitEncryptionResponse
 from pyphotonrealtime.protocol.packet.operation_packet import PhotonOperationPacket
 from pyphotonrealtime.protocol.packet.packet_stream import PhotonStreamParser
+from pyphotonrealtime.protocol.param.parameter_key import ParameterKey
 from pyphotonrealtime.protocol.photon_enc import build_dh_request, process_dh_response
 from pyphotonrealtime.transport import TcpTransport
 
@@ -80,6 +81,20 @@ class EventData:
 
     code: int
     parameters: Parameters = field(default_factory=dict)
+
+    @property
+    def sender(self) -> int:
+        """Actor number of the player that raised the event; 0 for the server."""
+        actor = self.parameters.get(ParameterKey.ActorNr)
+        return int(actor.value) if actor is not None else 0
+
+    @property
+    def custom_data(self) -> Any:  # noqa: ANN401
+        """The ``content`` of ``op_raise_event`` as plain Python values."""
+        from pyphotonrealtime.realtime._convert import to_python  # noqa: PLC0415
+
+        data = self.parameters.get(ParameterKey.Data)
+        return to_python(data) if data is not None else None
 
 
 @dataclass(slots=True)

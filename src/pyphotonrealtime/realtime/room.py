@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from pyphotonrealtime.protocol.property_keys import GamePropertyKey
 
 if TYPE_CHECKING:
+    from pyphotonrealtime.realtime.client import RealtimeClient
     from pyphotonrealtime.realtime.player import Player
 
 
@@ -25,6 +26,8 @@ _EXPECTED_USERS = _key(GamePropertyKey.ExpectedUsers)
 _PLAYER_TTL = _key(GamePropertyKey.PlayerTtl)
 _EMPTY_ROOM_TTL = _key(GamePropertyKey.EmptyRoomTtl)
 _PROPS_LISTED_IN_LOBBY = _key(GamePropertyKey.PropsListedInLobby)
+# Keys for sending; plain ints would be sent as Int32 instead of a byte.
+_MASTER_CLIENT_ID_KEY = GamePropertyKey.MasterClientId.value
 
 
 class RoomInfo:
@@ -81,9 +84,10 @@ class RoomInfo:
 class Room(RoomInfo):
     """The room the client is currently in."""
 
-    def __init__(self, name: str) -> None:
-        """Create an empty room named ``name``."""
+    def __init__(self, name: str, client: RealtimeClient | None = None) -> None:
+        """Create an empty room named ``name``, owned by ``client``."""
         super().__init__(name)
+        self.client = client
         self.players: dict[int, Player] = {}
         self.master_client_id = 0
         self.expected_users: list[str] = []
@@ -111,10 +115,34 @@ class Room(RoomInfo):
             case _:
                 super()._update_well_known(key, value)
 
-    def set_custom_properties(self, properties: dict[Any, Any]) -> bool:
+    def set_custom_properties(
+        self,
+        properties: dict[Any, Any],
+        expected: dict[Any, Any] | None = None,
+    ) -> bool:
         """Merge ``properties`` into the room's properties on the server.
+
+        See :meth:`RealtimeClient.op_set_properties_of_room`.
 
         Returns:
             Whether the operation was queued.
         """
-        raise NotImplementedError
+        if self.client is None:
+            return False
+        return self.client.op_set_properties_of_room(properties, expected)
+
+    def set_master_client(self, player: Player) -> bool:
+        """Make ``player`` the master client.
+
+        Only applies if the master client hasn't changed in the meantime;
+        ``on_master_client_switched`` fires once the server confirms.
+
+        Returns:
+            Whether the operation was queued.
+        """
+        if self.client is None or player.actor_number not in self.players:
+            return False
+        return self.client.op_set_properties_of_room(
+            {_MASTER_CLIENT_ID_KEY: player.actor_number},
+            {_MASTER_CLIENT_ID_KEY: self.master_client_id},
+        )

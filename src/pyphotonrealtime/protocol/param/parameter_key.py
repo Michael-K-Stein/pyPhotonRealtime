@@ -50,6 +50,7 @@ class ParameterKey(IntEnum):
     LobbyStats = 0xD3  # 211
     Region = 0xD2  # 210
     Plugins = 0xCC  # 204
+    MasterClientId = 0xCB  # 203
     Nickname = 0xCA  # 202
     Flags = 0xC7  # 199
     CloudType = 0xC6  # 198
@@ -72,6 +73,7 @@ class ParameterKey(IntEnum):
     ActorList = 0xFC  # 252, Actors
     CleanupCacheOnLeave = 0xF1  # 241, DeleteCacheOnLeave
     PublishUserId = 0xEF  # 239, GroupsForRemove
+    Remove = 0xEF  # 239, GroupsForRemove: interest groups
     Add = 0xEE  # 238, GroupsForAdd: expected users
     SqlLobbyFilter = 0xF5  # 245, Data
 
