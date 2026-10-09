@@ -49,10 +49,11 @@ separate layer and doesn't change the core.
 - [ ] e2e: Name Server -> Master Server against Photon Cloud (written; first run is on master CI)
 
 ### M3: Matchmaking and lobbies
-- [ ] Join/leave lobby, room list and `GameListUpdate` events, lobby stats
-- [ ] Create / Join / JoinOrCreate / JoinRandom / Rejoin, then the Game Server hop
-- [ ] `reconnect_and_rejoin` (needs the Game Server hop)
-- [ ] `OpFindFriends`, expected users, SQL lobby filters
+- [x] Join/leave lobby, room list and `GameListUpdate` events, lobby stats
+- [x] Create / Join / JoinOrCreate / JoinRandom / Rejoin, then the Game Server hop
+- [x] `reconnect_and_rejoin` (needs the Game Server hop)
+- [x] `OpFindFriends`, expected users, SQL lobby filters
+- [ ] e2e: create, join and leave a room on Photon Cloud (written; first run is on master CI)
 
 ### M4: In-room
 - [ ] Join/Leave/PropertiesChanged events, then update `Room`/`Player` and fire callbacks
