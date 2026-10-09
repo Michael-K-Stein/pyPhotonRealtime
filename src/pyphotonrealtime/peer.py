@@ -206,6 +206,20 @@ class PhotonPeer:
         self._outgoing.append(request)
         return True
 
+    def init_payload_encryption(self, secret: bytes) -> bool:
+        """Use an AES key handed out by the server instead of a key exchange.
+
+        With ``AuthOnce`` the Name Server returns this key, so later servers
+        skip the Diffie-Hellman exchange.
+
+        Returns:
+            Whether the key was set; the peer must be connected.
+        """
+        if self.state != PeerState.Connected:
+            return False
+        self._aes_key = secret
+        return True
+
     @property
     def is_encryption_available(self) -> bool:
         """Whether a shared AES key has been negotiated."""

@@ -19,6 +19,7 @@ import pytest
 
 from pyphotonrealtime import AppSettings, ClientState, PhotonPeer, RealtimeClient
 from pyphotonrealtime.peer import PeerState, StatusCode
+from pyphotonrealtime.realtime import AuthMode
 
 if TYPE_CHECKING:
     from pyphotonrealtime.peer import EventData, OperationResponse
@@ -44,11 +45,32 @@ def _service_until(client: RealtimeClient, state: ClientState) -> None:
         time.sleep(1 / 30)
 
 
-@pytest.mark.xfail(raises=NotImplementedError, reason="M2: connection workflow")
 def test_connect_to_master() -> None:
     client = RealtimeClient()
     client.connect_using_settings(
         AppSettings(app_id_realtime=APP_ID, fixed_region=REGION)
+    )
+    _service_until(client, ClientState.ConnectedToMasterServer)
+    assert client.user_id  # Photon assigns one when none is sent.
+    client.disconnect()
+    _service_until(client, ClientState.Disconnected)
+
+
+def test_connect_to_best_region() -> None:
+    client = RealtimeClient()
+    client.connect_using_settings(AppSettings(app_id_realtime=APP_ID))
+    _service_until(client, ClientState.ConnectedToMasterServer)
+    assert client.cloud_region
+    assert any(region.ping is not None for region in client.regions)
+    client.disconnect()
+
+
+def test_auth_once_to_master() -> None:
+    client = RealtimeClient()
+    client.connect_using_settings(
+        AppSettings(
+            app_id_realtime=APP_ID, fixed_region=REGION, auth_mode=AuthMode.AuthOnce
+        )
     )
     _service_until(client, ClientState.ConnectedToMasterServer)
     client.disconnect()
