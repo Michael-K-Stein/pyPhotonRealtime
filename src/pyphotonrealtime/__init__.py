@@ -9,6 +9,9 @@ Layers, bottom to top:
   operation/event/response queues, keep-alive, timeouts, encryption.
 * :mod:`pyphotonrealtime.realtime`  -- ``RealtimeClient``: Name Server -> Master
   Server -> Game Server workflow, matchmaking, rooms, players, callbacks.
+
+Beside them, :mod:`pyphotonrealtime.server` is a self-hosted Photon server
+(``PhotonServer``) built on the same protocol layer.
 """
 
 from pyphotonrealtime.peer import PeerState, PhotonPeer

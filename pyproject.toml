@@ -23,7 +23,7 @@ packages = ["src/pyphotonrealtime"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["-m", "not e2e", "--strict-markers"]
-markers = ["e2e: talks to the real Photon Cloud (needs PHOTON_APP_ID)"]
+markers = ["e2e: talks to Photon Cloud (needs PHOTON_APP_ID) or runs the C++ SDK demos"]
 
 [tool.mypy]
 python_version = "3.12"

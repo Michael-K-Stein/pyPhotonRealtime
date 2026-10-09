@@ -23,6 +23,9 @@ class DictionaryParameter[K: ParameterBase[Any], V: ParameterBase[Any]](
 ):
     """Strongly typed dictionary ('D'). Type codes are declared ONCE in the header."""
 
+    type_header: bytes | None = None
+    """Protocol 1.8 type header as received, so a relay sends the same types."""
+
     @classmethod
     def from_stream(cls, stream: BytesIO) -> Self:
         key_type = unpack(">B", stream.read(1))[0]

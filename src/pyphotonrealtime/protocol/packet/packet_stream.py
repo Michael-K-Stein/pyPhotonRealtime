@@ -8,7 +8,11 @@ from pyphotonrealtime.protocol.packet.base import PhotonPacket
 from pyphotonrealtime.protocol.packet.disconnect import DisconnectMessagePacket
 from pyphotonrealtime.protocol.packet.format import PacketFormat
 from pyphotonrealtime.protocol.packet.header import PhotonDataPacketHeader
-from pyphotonrealtime.protocol.packet.init import InitRequestPacket, InitResponsePacket
+from pyphotonrealtime.protocol.packet.init import (
+    HTTP_INIT_PREFIX,
+    InitRequestPacket,
+    InitResponsePacket,
+)
 from pyphotonrealtime.protocol.packet.keep_alive import (
     PhotonKeepAliveRequest,
     PhotonKeepAliveResponse,
@@ -118,6 +122,12 @@ class PhotonStreamParser:
             return None
 
         content_data = datastream.read(data_header.packet_length - data_header.size())
+        if bytes([data_header.msg_magic, data_header.command]) == HTTP_INIT_PREFIX:
+            packet = InitRequestPacket.from_http(
+                HTTP_INIT_PREFIX + content_data, header=data_header
+            )
+            self.protocol = packet.serialization_protocol
+            return packet
         return self._handle_data_packet(data_header, content_data, aes_key)
 
     def _handle_data_packet(

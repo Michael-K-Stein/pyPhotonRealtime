@@ -351,10 +351,8 @@ def _write_body(param: ParameterBase[Any], code: int) -> bytes:  # noqa: C901, P
             return _write_hashtable(cast("HashtableParameter[Any, Any]", param))
         case GpType18.Dictionary:
             dictionary = cast("DictionaryParameter[Any, Any]", param)
-            key_code, value_code = _dictionary_codes(dictionary)
-            return bytes([key_code, value_code]) + _write_dictionary_entries(
-                dictionary, key_code, value_code
-            )
+            header, key_code, value_code = _dictionary_header(dictionary)
+            return header + _write_dictionary_entries(dictionary, key_code, value_code)
         case GpType18.ObjectArray | GpType18.Array:
             elements = cast("Iterable[ParameterBase[Any]]", param.value)
             items = list(elements)
@@ -373,6 +371,11 @@ def _write_body(param: ParameterBase[Any], code: int) -> bytes:  # noqa: C901, P
 
 def _write_typed_array(param: ParameterBase[Any], code: int) -> bytes:
     elements = _array_elements(param)
+    if code == GpType18.DictionaryArray:
+        # The dictionary type comes before the count here (unlike other arrays).
+        return _write_dictionary_array(
+            cast("list[DictionaryParameter[Any, Any]]", elements)
+        )
     out = bytearray(write_compressed_uint(len(elements)))
     match code:
         case GpType18.BooleanArray:
@@ -383,16 +386,6 @@ def _write_typed_array(param: ParameterBase[Any], code: int) -> bytes:
             for custom in customs:
                 data = custom.value["data"]
                 out += write_compressed_uint(len(data)) + data
-        case GpType18.DictionaryArray:
-            dictionaries = cast("list[DictionaryParameter[Any, Any]]", elements)
-            key_code, value_code = (
-                _dictionary_codes(dictionaries[0])
-                if dictionaries
-                else (GpType18.Unknown, GpType18.Unknown)
-            )
-            out += bytes([key_code, value_code])
-            for dictionary in dictionaries:
-                out += _write_dictionary_entries(dictionary, key_code, value_code)
         case GpType18.HashtableArray:
             for table in elements:
                 out += _write_hashtable(cast("HashtableParameter[Any, Any]", table))
@@ -400,6 +393,21 @@ def _write_typed_array(param: ParameterBase[Any], code: int) -> bytes:
             element_code = GpType18(code & ~GpType18.Array)
             for element in elements:
                 out += _write_body(element, element_code)
+    return bytes(out)
+
+
+def _write_dictionary_array(
+    dictionaries: list[DictionaryParameter[Any, Any]],
+) -> bytes:
+    header, key_code, value_code = (
+        _dictionary_header(dictionaries[0])
+        if dictionaries
+        else (bytes(2), GpType18.Unknown, GpType18.Unknown)
+    )
+    out = bytearray(header)
+    out += write_compressed_uint(len(dictionaries))
+    for dictionary in dictionaries:
+        out += _write_dictionary_entries(dictionary, key_code, value_code)
     return bytes(out)
 
 
@@ -454,6 +462,23 @@ def _dictionary_codes(dictionary: DictionaryParameter[Any, Any]) -> tuple[int, i
         return code if code in _DICTIONARY_TYPED else GpType18.Unknown
 
     return common(dictionary.keys()), common(dictionary.values())
+
+
+def _dictionary_header(
+    dictionary: DictionaryParameter[Any, Any],
+) -> tuple[bytes, int, int]:
+    """Type header plus key and value codes: as received, or worked out.
+
+    Array values are declared ``object`` instead: the C++ SDK writes them in a
+    form its own reader (and the .NET one) doesn't read back, so each value
+    carries its full type instead.
+    """
+    if (header := dictionary.type_header) is not None:
+        if header[1] == GpType18.Array:
+            return bytes([header[0], GpType18.Unknown]), header[0], GpType18.Unknown
+        return header, header[0], header[1]
+    key_code, value_code = _dictionary_codes(dictionary)
+    return bytes([key_code, value_code]), key_code, value_code
 
 
 def _write_dictionary_entries(
@@ -528,8 +553,17 @@ def _read_custom(stream: BytesIO) -> CustomParameter:
 
 
 def _read_dictionary(stream: BytesIO) -> DictionaryParameter[Any, Any]:
+    header, key_code, value_code = _read_dictionary_type(stream)
+    dictionary = _read_dictionary_entries(stream, key_code, value_code)
+    dictionary.type_header = header
+    return dictionary
+
+
+def _read_dictionary_type(stream: BytesIO) -> tuple[bytes, int, int]:
+    """Read a dictionary's type header; also return its raw bytes."""
+    start = stream.tell()
     key_code, value_code = _read_dictionary_header(stream)
-    return _read_dictionary_entries(stream, key_code, value_code)
+    return stream.getvalue()[start : stream.tell()], key_code, value_code
 
 
 def _read_dictionary_header(stream: BytesIO) -> tuple[int, int]:
@@ -556,12 +590,18 @@ def _read_dictionary_entries(
 ) -> DictionaryParameter[Any, Any]:
     result: dict[ParameterBase[Any], ParameterBase[Any]] = {}
     for _ in range(read_compressed_uint(stream)):
-        key = read_value(stream, None if key_code == GpType18.Unknown else key_code)
-        value = read_value(
-            stream, None if value_code == GpType18.Unknown else value_code
-        )
-        result[key] = value
+        key = read_value(stream, _declared(key_code))
+        result[key] = read_value(stream, _declared(value_code))
     return DictionaryParameter(cast("Any", result))
+
+
+def _declared(code: int) -> int | None:
+    """The code to read a dictionary entry with; None if it carries its own.
+
+    The C++ SDK repeats an array value's full type per entry even when the
+    header declares it.
+    """
+    return None if code in {GpType18.Unknown, GpType18.Array} else code
 
 
 def _read_hashtable(stream: BytesIO) -> HashtableParameter[Any, Any]:
@@ -620,6 +660,18 @@ _ELEMENT_TYPES = {code: element for element, code in _ARRAY_CODES.items()}
 
 
 def _read_typed_array(stream: BytesIO, code: int) -> SliceParameter[Any]:
+    if code == GpType18.DictionaryArray:
+        # The dictionary type comes before the count here (unlike other arrays).
+        header, key_code, value_code = _read_dictionary_type(stream)
+        dictionaries = [
+            _read_dictionary_entries(stream, key_code, value_code)
+            for _ in range(read_compressed_uint(stream))
+        ]
+        for dictionary in dictionaries:
+            dictionary.type_header = header
+        return SliceParameter(
+            cast("Any", dictionaries), element_type=_ELEMENT_TYPES.get(GpType18(code))
+        )
     count = read_compressed_uint(stream)
     elements: list[ParameterBase[Any]] = []
     match code:
@@ -636,12 +688,6 @@ def _read_typed_array(stream: BytesIO, code: int) -> SliceParameter[Any]:
                 elements.append(
                     CustomParameter({"id": custom_id, "data": stream.read(size)})
                 )
-        case GpType18.DictionaryArray:
-            key_code, value_code = _read_dictionary_header(stream)
-            elements = [
-                _read_dictionary_entries(stream, key_code, value_code)
-                for _ in range(count)
-            ]
         case GpType18.HashtableArray:
             elements = [_read_hashtable(stream) for _ in range(count)]
         case _:
