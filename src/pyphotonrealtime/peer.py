@@ -18,7 +18,8 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from pyphotonrealtime.protocol.command_code import CommandCode
+from pyphotonrealtime.protocol.command_code import CommandCode, InternalOperationCode
+from pyphotonrealtime.protocol.custom_types import register_type
 from pyphotonrealtime.protocol.packet.disconnect import DisconnectMessagePacket
 from pyphotonrealtime.protocol.packet.factory import PacketFactory
 from pyphotonrealtime.protocol.packet.init import InitRequestPacket, InitResponsePacket
@@ -29,8 +30,10 @@ from pyphotonrealtime.protocol.packet.keep_alive import (
 from pyphotonrealtime.protocol.packet.key_exchange import InitEncryptionResponse
 from pyphotonrealtime.protocol.packet.operation_packet import PhotonOperationPacket
 from pyphotonrealtime.protocol.packet.packet_stream import PhotonStreamParser
+from pyphotonrealtime.protocol.param.int32_param import Int32Parameter
 from pyphotonrealtime.protocol.param.parameter_key import ParameterKey
 from pyphotonrealtime.protocol.photon_enc import build_dh_request, process_dh_response
+from pyphotonrealtime.protocol.serialization_protocol import SerializationProtocol
 from pyphotonrealtime.transport import TcpTransport
 
 if TYPE_CHECKING:
@@ -41,6 +44,29 @@ if TYPE_CHECKING:
     from pyphotonrealtime.transport import Transport
 
 type Parameters = dict[int, ParameterBase[Any]]
+
+# Parameters of the internal ping operation: our time, echoed back.
+_PING_CLIENT_TIME = 1
+# Keep timestamps positive so they also fit an Int32 parameter.
+_INT32_MASK = 0x7FFFFFFF
+
+
+def split_address(address: str) -> tuple[str, int, str]:
+    """Split ``[scheme://]host:port[/path]``.
+
+    Returns:
+        Host (without IPv6 brackets), port and path (``""`` if none).
+
+    Raises:
+        ValueError: ``address`` has no port.
+    """
+    _, _, rest = address.rpartition("://")
+    authority, slash, path = rest.partition("/")
+    host, _, port = authority.rpartition(":")
+    if not host or not port.isdigit():
+        msg = f"expected host:port, got {address!r}"
+        raise ValueError(msg)
+    return host.strip("[]"), int(port), slash + path
 
 
 class PeerState(Enum):
@@ -123,6 +149,9 @@ class PeerListener(Protocol):
 class PhotonPeer:
     """One connection to one Photon server, driven by :meth:`service`."""
 
+    register_type = staticmethod(register_type)
+    """``PhotonPeer.RegisterType``: see ``protocol.custom_types``."""
+
     def __init__(
         self,
         listener: PeerListener,
@@ -130,6 +159,7 @@ class PhotonPeer:
         *,
         disconnect_timeout: float = 10.0,
         keep_alive_interval: float = 2.0,
+        serialization_protocol: SerializationProtocol = SerializationProtocol.V18,
     ) -> None:
         """Create a disconnected peer.
 
@@ -138,11 +168,14 @@ class PhotonPeer:
             transport: Byte transport to use; defaults to TCP.
             disconnect_timeout: Seconds without traffic before giving up.
             keep_alive_interval: Seconds of idle sending before a ping.
+            serialization_protocol: Protocol 1.8 (default, like current SDKs)
+                or 1.6. Takes effect on the next ``connect``.
         """
         self.listener = listener
         self.transport = transport if transport is not None else TcpTransport()
         self.disconnect_timeout = disconnect_timeout
         self.keep_alive_interval = keep_alive_interval
+        self.serialization_protocol = serialization_protocol
 
         self.state = PeerState.Disconnected
         self.server_address: str | None = None
@@ -155,10 +188,11 @@ class PhotonPeer:
         self.last_round_trip_time: int | None = None
         """Most recent keep-alive round-trip time in milliseconds."""
 
-        self._parser = PhotonStreamParser()
+        self._parser = PhotonStreamParser(serialization_protocol)
         self._outgoing: deque[PhotonPacket] = deque()
         self._incoming: deque[PhotonPacket | StatusCode] = deque()
         self._aes_key: bytes | None = None
+        self._transport_encryption = False
         self._dh_private_key: int | None = None
         self._epoch = self._now()
         self._last_receive = 0.0
@@ -169,35 +203,38 @@ class PhotonPeer:
     def connect(self, server_address: str, app_id: str) -> bool:
         """Connect to ``host:port`` and send the init request.
 
+        ``server_address`` may carry a scheme (``wss://host:port``), the way
+        the Name Server hands out WebSocket addresses.
+
         The TCP connect itself blocks (up to ``disconnect_timeout``). The
         outcome arrives as ``StatusCode.Connect`` once the server acknowledged
         the init, or as ``StatusCode.ExceptionOnConnect``.
 
         Returns:
             Whether the connection attempt was started.
-
-        Raises:
-            ValueError: ``server_address`` is not ``host:port``.
         """
         if self.state != PeerState.Disconnected:
             return False
-        host, _, port = server_address.rpartition(":")
-        if not host or not port.isdigit():
-            msg = f"expected host:port, got {server_address!r}"
-            raise ValueError(msg)
+        host, port, path = split_address(server_address)
 
         self._reset()
         self.server_address = server_address
         self.app_id = app_id
         try:
-            self.transport.connect(host.strip("[]"), int(port), self.disconnect_timeout)
+            self.transport.path = path
+            self.transport.connect(host, port, self.disconnect_timeout)
         except OSError:
             self._incoming.append(StatusCode.ExceptionOnConnect)
             return False
 
         self.state = PeerState.Connecting
         self._last_receive = self._last_send = self._now()
-        self._outgoing.append(InitRequestPacket(app_id=app_id.replace("-", "")))
+        self._outgoing.append(
+            InitRequestPacket(
+                app_id=app_id.replace("-", ""),
+                serialization_protocol=self.serialization_protocol,
+            )
+        )
         return True
 
     def disconnect(self) -> None:
@@ -210,14 +247,23 @@ class PhotonPeer:
         """Start a Diffie-Hellman key exchange (``InitEncryptionRequest``).
 
         The outcome arrives as ``StatusCode.EncryptionEstablished`` or
-        ``StatusCode.EncryptionFailedToEstablish``.
+        ``StatusCode.EncryptionFailedToEstablish``. On a TLS transport (WSS)
+        it's established right away: like the SDKs, the peer then sends
+        "encrypted" operations as plain ones, inside TLS.
 
         Returns:
             Whether the exchange was started.
         """
         if self.state != PeerState.Connected or self._dh_private_key is not None:
             return False
-        self._dh_private_key, request = build_dh_request()
+        if self.transport.secure:
+            if not self._transport_encryption:
+                self._transport_encryption = True
+                self._incoming.append(StatusCode.EncryptionEstablished)
+            return True
+        self._dh_private_key, request = build_dh_request(
+            protocol=self.serialization_protocol
+        )
         self._outgoing.append(request)
         return True
 
@@ -232,13 +278,16 @@ class PhotonPeer:
         """
         if self.state != PeerState.Connected:
             return False
-        self._aes_key = secret
+        if self.transport.secure:
+            self._transport_encryption = True
+        else:
+            self._aes_key = secret
         return True
 
     @property
     def is_encryption_available(self) -> bool:
-        """Whether a shared AES key has been negotiated."""
-        return self._aes_key is not None
+        """Whether a shared AES key has been negotiated (or TLS stands in)."""
+        return self._aes_key is not None or self._transport_encryption
 
     # -- service loop -----------------------------------------------------
 
@@ -279,7 +328,7 @@ class PhotonPeer:
             and not self._outgoing
             and now - self._last_send >= self.keep_alive_interval
         ):
-            self._outgoing.append(PhotonKeepAliveRequest(self._client_time()))
+            self._outgoing.append(self._keep_alive())
         try:
             if self._outgoing:
                 data = self._outgoing.popleft().serialize()
@@ -297,9 +346,18 @@ class PhotonPeer:
     # -- operations -------------------------------------------------------
 
     def send_operation(
-        self, operation_code: int, parameters: Parameters, *, encrypt: bool = False
+        self,
+        operation_code: int,
+        parameters: Parameters,
+        *,
+        encrypt: bool = False,
+        reliable: bool = True,
+        channel: int = 0,
     ) -> bool:
         """Queue an operation; it goes out on the next ``send_outgoing_commands``.
+
+        ``reliable`` and ``channel`` only matter for UDP; TCP and WebSockets
+        deliver everything reliably and in order.
 
         Returns:
             Whether the operation was queued. ``False`` when not connected, or
@@ -307,13 +365,16 @@ class PhotonPeer:
         """
         if self.state != PeerState.Connected:
             return False
-        if encrypt and self._aes_key is None:
+        if encrypt and not self.is_encryption_available:
             return False
+        encrypt = encrypt and self._aes_key is not None
         packet = PacketFactory.operation(
             CommandCode.EncryptedOperation if encrypt else CommandCode.Operation,
             operation=cast("OperationCode", operation_code),
             params=cast("CommandParams", dict(parameters)),
+            protocol=self.serialization_protocol,
         )
+        packet.get_header().peer_id = bytes([channel, 1 if reliable else 0])
         if self._aes_key is not None:
             packet.set_aes_key(self._aes_key)
         self._outgoing.append(packet)
@@ -322,9 +383,10 @@ class PhotonPeer:
     # -- internals --------------------------------------------------------
 
     def _reset(self) -> None:
-        self._parser = PhotonStreamParser()
+        self._parser = PhotonStreamParser(self.serialization_protocol)
         self._outgoing.clear()
         self._aes_key = None
+        self._transport_encryption = False
         self._dh_private_key = None
         self.traffic_stats = TrafficStats()
         self.round_trip_time = 0.0
@@ -372,7 +434,35 @@ class PhotonPeer:
         elif isinstance(packet, DisconnectMessagePacket):
             self._close(StatusCode.DisconnectByServer)
         elif isinstance(packet, PhotonOperationPacket):
+            if self._is_ping_response(packet):
+                ping = cast("Parameters", packet.get_payload().params).get(
+                    _PING_CLIENT_TIME
+                )
+                if ping is not None:
+                    self._update_round_trip_time(int(ping.value))
+                return
             self._dispatch_operation(packet)
+
+    def _keep_alive(self) -> PhotonPacket:
+        if not self.transport.ping_with_operation:
+            return PhotonKeepAliveRequest(self._client_time())
+        return PacketFactory.operation(
+            cast("Any", CommandCode.InternalOperationRequest),
+            operation=cast("OperationCode", InternalOperationCode.Ping),
+            params=cast(
+                "CommandParams",
+                {_PING_CLIENT_TIME: Int32Parameter(self._client_time() & _INT32_MASK)},
+            ),
+            protocol=self.serialization_protocol,
+        )
+
+    @staticmethod
+    def _is_ping_response(packet: PhotonOperationPacket) -> bool:
+        return (
+            packet.get_header().get_command_code()
+            == CommandCode.InternalOperationResponse
+            and int(packet.get_payload().operation_code) == InternalOperationCode.Ping
+        )
 
     def _dispatch_operation(self, packet: PhotonOperationPacket) -> None:
         payload = packet.get_payload()
@@ -406,7 +496,7 @@ class PhotonPeer:
 
     def _update_round_trip_time(self, client_time: int) -> None:
         # Same smoothing as the official SDKs (UpdateRoundTripTimeAndVariance).
-        rtt = (self._client_time() - client_time) & 0xFFFFFFFF
+        rtt = (self._client_time() - client_time) & _INT32_MASK
         if self.last_round_trip_time is None:
             self.round_trip_time = float(rtt)
         else:
@@ -419,7 +509,7 @@ class PhotonPeer:
 
     def _client_time(self) -> int:
         """Milliseconds since this peer was created, as a 32-bit timestamp."""
-        return int((self._now() - self._epoch) * 1000) & 0xFFFFFFFF
+        return int((self._now() - self._epoch) * 1000) & _INT32_MASK
 
     @staticmethod
     def _now() -> float:

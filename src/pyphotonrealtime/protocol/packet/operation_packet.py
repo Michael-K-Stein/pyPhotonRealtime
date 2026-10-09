@@ -8,6 +8,7 @@ from pyphotonrealtime.protocol.packet.operation_payload import (
     PhotonPacketEncryptedPayload,
     PhotonPacketPayload,
 )
+from pyphotonrealtime.protocol.serialization_protocol import SerializationProtocol
 
 if TYPE_CHECKING:
     from io import BytesIO
@@ -34,6 +35,7 @@ class PhotonOperationPacket(PhotonDataPacket):
         *,
         header: PhotonDataPacketHeader | None = None,
         aes_key: bytes | None = None,
+        protocol: SerializationProtocol = SerializationProtocol.V16,
     ) -> Self:
         if header is None:
             msg = "Header is required for PhotonOperationPacket.from_bytes"
@@ -55,9 +57,11 @@ class PhotonOperationPacket(PhotonDataPacket):
 
             payload = PhotonPacketEncryptedPayload.from_bytes(
                 header=header, data=payload_data
-            ).decrypt(aes_key)
+            ).decrypt(aes_key, protocol)
         else:
-            payload = PhotonPacketPayload.from_bytes(header=header, data=payload_data)
+            payload = PhotonPacketPayload.from_bytes(
+                header=header, data=payload_data, protocol=protocol
+            )
 
         return cls(header=header, payload=payload, aes_key=aes_key)
 

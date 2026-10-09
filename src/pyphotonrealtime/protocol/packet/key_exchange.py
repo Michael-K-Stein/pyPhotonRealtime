@@ -9,6 +9,7 @@ from pyphotonrealtime.protocol.packet.operation_packet import PhotonOperationPac
 from pyphotonrealtime.protocol.packet.operation_payload import PhotonPacketPayload
 from pyphotonrealtime.protocol.param.int8_slice_param import Int8SliceParameter
 from pyphotonrealtime.protocol.param.parameter_key import ParameterKey
+from pyphotonrealtime.protocol.serialization_protocol import SerializationProtocol
 
 if TYPE_CHECKING:
     from io import BytesIO
@@ -32,6 +33,7 @@ class KeyExchangePacket(PhotonOperationPacket):
         public_key: Int8SliceParameter | bytes | None = None,
         payload: PhotonPacketPayload | None = None,
         aes_key: bytes | None = None,  # noqa: ARG002 - key exchange is never encrypted
+        protocol: SerializationProtocol = SerializationProtocol.V16,
     ) -> None:
         client_key = (
             Int8SliceParameter(public_key)
@@ -51,6 +53,7 @@ class KeyExchangePacket(PhotonOperationPacket):
                 ),
                 params={ParameterKey.ClientKey: client_key},
                 header=header,
+                protocol=protocol,
             )
         elif client_key is not None:
             payload.params[ParameterKey.ClientKey] = client_key
@@ -67,11 +70,19 @@ class KeyExchangePacket(PhotonOperationPacket):
         *,
         header: PhotonDataPacketHeader | None = None,
         aes_key: bytes | None = None,  # noqa: ARG003 - key exchange is never encrypted
+        protocol: SerializationProtocol = SerializationProtocol.V16,
     ) -> Self:
-        packet = PhotonOperationPacket.from_bytes(data, header=header, aes_key=None)
+        packet = PhotonOperationPacket.from_bytes(
+            data, header=header, aes_key=None, protocol=protocol
+        )
+        return cls.from_operation(packet)
+
+    @classmethod
+    def from_operation(cls, packet: PhotonOperationPacket) -> Self:
         return cls(
             header=packet.get_header(),
             public_key=_extract_public_key(packet.get_payload()),
+            protocol=packet.get_payload().protocol,
         )
 
     def get_public_key(self) -> bytes:
@@ -89,6 +100,7 @@ class InitEncryptionRequest(KeyExchangePacket):
         header: PhotonDataPacketHeader | None = None,
         payload: PhotonPacketPayload | None = None,
         aes_key: bytes | None = None,
+        protocol: SerializationProtocol = SerializationProtocol.V16,
     ) -> None:
         super().__init__(
             header=(
@@ -99,6 +111,7 @@ class InitEncryptionRequest(KeyExchangePacket):
             public_key=public_key,
             payload=payload,
             aes_key=aes_key,
+            protocol=protocol,
         )
 
 
@@ -110,6 +123,7 @@ class InitEncryptionResponse(KeyExchangePacket):
         header: PhotonDataPacketHeader | None = None,
         payload: PhotonPacketPayload | None = None,
         aes_key: bytes | None = None,
+        protocol: SerializationProtocol = SerializationProtocol.V16,
     ) -> None:
         super().__init__(
             header=(
@@ -122,4 +136,5 @@ class InitEncryptionResponse(KeyExchangePacket):
             public_key=public_key,
             payload=payload,
             aes_key=aes_key,
+            protocol=protocol,
         )

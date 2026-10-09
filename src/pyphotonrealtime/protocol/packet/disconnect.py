@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Self
 
 from pyphotonrealtime.protocol.packet.operation_packet import PhotonOperationPacket
+from pyphotonrealtime.protocol.serialization_protocol import SerializationProtocol
 
 if TYPE_CHECKING:
     from io import BytesIO
@@ -27,8 +28,11 @@ class DisconnectMessagePacket(PhotonOperationPacket):
         *,
         header: PhotonDataPacketHeader | None = None,
         aes_key: bytes | None = None,
+        protocol: SerializationProtocol = SerializationProtocol.V16,
     ) -> Self:
-        return super().from_bytes(data, header=header, aes_key=aes_key)
+        return super().from_bytes(
+            data, header=header, aes_key=aes_key, protocol=protocol
+        )
 
     def log(self) -> list[str]:
         return [

@@ -8,6 +8,7 @@ from pyphotonrealtime.protocol.consts import DH_GENERATOR, OAKLEY_PRIME_768
 from pyphotonrealtime.protocol.packet.key_exchange import (
     InitEncryptionRequest,
 )
+from pyphotonrealtime.protocol.serialization_protocol import SerializationProtocol
 
 if TYPE_CHECKING:
     from pyphotonrealtime.protocol.packet.key_exchange import (
@@ -52,13 +53,15 @@ def generate_dh_keys(client_pub_key: bytes) -> tuple[bytes, bytes]:
 
 def build_dh_request(
     priv_key_int: int | None = None,
+    protocol: SerializationProtocol = SerializationProtocol.V16,
 ) -> tuple[int, InitEncryptionRequest]:
     if priv_key_int is None:
         priv_key = os.urandom(20)
         priv_key_int = int.from_bytes(priv_key, byteorder="big")
     pub_int = compute_public_key(priv_key_int)
     return priv_key_int, InitEncryptionRequest(
-        public_key=pub_int.to_bytes((pub_int.bit_length() + 7) // 8)
+        public_key=pub_int.to_bytes((pub_int.bit_length() + 7) // 8),
+        protocol=protocol,
     )
 
 

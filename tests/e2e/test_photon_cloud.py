@@ -12,15 +12,19 @@ only check self-consistency) can't do.
 from __future__ import annotations
 
 import os
+import struct
 import time
 import uuid
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, override
 
 import pytest
 
 from pyphotonrealtime import AppSettings, ClientState, PhotonPeer, RealtimeClient
 from pyphotonrealtime.peer import PeerState, StatusCode
+from pyphotonrealtime.protocol.custom_types import register_type, unregister_type
 from pyphotonrealtime.protocol.event_code import CUSTOM_EVENT_CODE_MAX
+from pyphotonrealtime.protocol.serialization_protocol import SerializationProtocol
 from pyphotonrealtime.realtime import (
     AuthMode,
     EnterRoomParams,
@@ -30,9 +34,10 @@ from pyphotonrealtime.realtime import (
     RoomOptions,
     SendOptions,
 )
+from pyphotonrealtime.transport import ConnectionProtocol, create_transport
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     from pyphotonrealtime.peer import EventData, OperationResponse
     from pyphotonrealtime.realtime import Player
@@ -48,6 +53,18 @@ pytestmark = [
     pytest.mark.skipif(not APP_ID, reason="PHOTON_APP_ID not set"),
 ]
 
+PROTOCOLS = [
+    pytest.param(ConnectionProtocol.Tcp, id="tcp"),
+    pytest.param(ConnectionProtocol.Udp, id="udp"),
+    pytest.param(ConnectionProtocol.WebSocketSecure, id="wss"),
+]
+NAME_SERVER_PORTS = {
+    ConnectionProtocol.Udp: 5058,
+    ConnectionProtocol.Tcp: 4533,
+    ConnectionProtocol.WebSocket: 9093,
+    ConnectionProtocol.WebSocketSecure: 19093,
+}
+
 
 def _service_until(client: RealtimeClient, state: ClientState) -> None:
     deadline = time.monotonic() + TIMEOUT_SECONDS
@@ -61,49 +78,75 @@ def _service_until(client: RealtimeClient, state: ClientState) -> None:
         time.sleep(1 / 30)
 
 
-def test_connect_to_master() -> None:
+@pytest.mark.parametrize(
+    "protocol", [*PROTOCOLS, pytest.param(ConnectionProtocol.WebSocket, id="ws")]
+)
+@pytest.mark.parametrize(
+    "serialization",
+    [
+        pytest.param(SerializationProtocol.V16, id="gp16"),
+        pytest.param(SerializationProtocol.V18, id="gp18"),
+    ],
+)
+def test_connect_to_master(
+    protocol: ConnectionProtocol, serialization: SerializationProtocol
+) -> None:
     client = RealtimeClient()
+    client.peer.serialization_protocol = serialization
     client.connect_using_settings(
-        AppSettings(app_id_realtime=APP_ID, fixed_region=REGION)
+        AppSettings(app_id_realtime=APP_ID, fixed_region=REGION, protocol=protocol)
     )
     _service_until(client, ClientState.ConnectedToMasterServer)
     assert client.user_id  # Photon assigns one when none is sent.
+    assert client.protocol == protocol
     client.disconnect()
     _service_until(client, ClientState.Disconnected)
 
 
-def test_connect_to_best_region() -> None:
+@pytest.mark.parametrize("protocol", PROTOCOLS)
+def test_connect_to_best_region(protocol: ConnectionProtocol) -> None:
     client = RealtimeClient()
-    client.connect_using_settings(AppSettings(app_id_realtime=APP_ID))
+    client.connect_using_settings(
+        AppSettings(app_id_realtime=APP_ID, protocol=protocol)
+    )
     _service_until(client, ClientState.ConnectedToMasterServer)
     assert client.cloud_region
     assert any(region.ping is not None for region in client.regions)
     client.disconnect()
 
 
-def test_auth_once_to_master() -> None:
+@pytest.mark.parametrize("protocol", PROTOCOLS)
+def test_auth_once_to_master(protocol: ConnectionProtocol) -> None:
     client = RealtimeClient()
     client.connect_using_settings(
         AppSettings(
-            app_id_realtime=APP_ID, fixed_region=REGION, auth_mode=AuthMode.AuthOnce
+            app_id_realtime=APP_ID,
+            fixed_region=REGION,
+            auth_mode=AuthMode.AuthOnce,
+            protocol=protocol,
         )
     )
     _service_until(client, ClientState.ConnectedToMasterServer)
     client.disconnect()
 
 
-def _connected_client() -> RealtimeClient:
+def _connected_client(
+    protocol: ConnectionProtocol = ConnectionProtocol.Tcp,
+    serialization: SerializationProtocol = SerializationProtocol.V18,
+) -> RealtimeClient:
     client = RealtimeClient()
+    client.peer.serialization_protocol = serialization
     client.connect_using_settings(
-        AppSettings(app_id_realtime=APP_ID, fixed_region=REGION)
+        AppSettings(app_id_realtime=APP_ID, fixed_region=REGION, protocol=protocol)
     )
     _service_until(client, ClientState.ConnectedToMasterServer)
     return client
 
 
-def test_create_join_and_leave_room() -> None:
+@pytest.mark.parametrize("protocol", PROTOCOLS)
+def test_create_join_and_leave_room(protocol: ConnectionProtocol) -> None:
     room_name = f"pyphotonrealtime-e2e-{uuid.uuid4().hex[:8]}"
-    host = _connected_client()
+    host = _connected_client(protocol)
     host.local_player.nick_name = "host"
     assert host.op_create_room(
         EnterRoomParams(
@@ -118,7 +161,7 @@ def test_create_join_and_leave_room() -> None:
     assert host.current_room.custom_properties == {"mode": "e2e"}
     assert host.local_player.actor_number == 1
 
-    guest = _connected_client()
+    guest = _connected_client(protocol)
     assert guest.op_join_room(EnterRoomParams(room_name=room_name))
     _service_until(guest, ClientState.Joined)
     room = guest.current_room
@@ -184,9 +227,57 @@ def _service_both_until(
         time.sleep(1 / 30)
 
 
-def test_two_clients_exchange_events_and_properties() -> None:
+@dataclass
+class _Vector:
+    x: float
+    y: float
+
+
+@pytest.fixture
+def vector_type() -> Iterator[None]:
+    register_type(
+        _Vector,
+        code=ord("V"),
+        serialize=lambda v: struct.pack(">ff", v.x, v.y),
+        deserialize=lambda data: _Vector(*struct.unpack(">ff", data)),
+    )
+    yield
+    unregister_type(_Vector)
+
+
+@pytest.mark.usefixtures("vector_type")
+@pytest.mark.parametrize(
+    ("host_protocol", "guest_protocol", "host_serialization"),
+    [
+        pytest.param(ConnectionProtocol.Tcp, ConnectionProtocol.Tcp, 18, id="tcp"),
+        pytest.param(ConnectionProtocol.Udp, ConnectionProtocol.Udp, 18, id="udp"),
+        pytest.param(
+            ConnectionProtocol.WebSocketSecure,
+            ConnectionProtocol.WebSocketSecure,
+            18,
+            id="wss",
+        ),
+        pytest.param(
+            ConnectionProtocol.Udp,
+            ConnectionProtocol.WebSocketSecure,
+            16,
+            id="udp-gp16-with-wss-gp18",
+        ),
+    ],
+)
+def test_two_clients_exchange_events_and_properties(
+    host_protocol: ConnectionProtocol,
+    guest_protocol: ConnectionProtocol,
+    host_serialization: int,
+) -> None:
     room_name = f"pyphotonrealtime-e2e-{uuid.uuid4().hex[:8]}"
-    host, guest = _connected_client(), _connected_client()
+    host = _connected_client(
+        host_protocol,
+        SerializationProtocol.V16
+        if host_serialization == 16
+        else SerializationProtocol.V18,
+    )
+    guest = _connected_client(guest_protocol)
     host_seen, guest_seen = _InRoomRecorder(), _InRoomRecorder()
     host.add_callback_target(host_seen)
     guest.add_callback_target(guest_seen)
@@ -215,6 +306,16 @@ def test_two_clients_exchange_events_and_properties() -> None:
     )
     (event,) = guest_seen.events
     assert (event.code, event.sender, event.custom_data) == (8, 1, "to-guest")
+
+    # Large payloads (UDP fragments them), custom types, unreliable sends.
+    blob = os.urandom(20_000)
+    assert guest.op_raise_event(9, {"blob": blob, "at": _Vector(1.5, -2.0)})
+    for _ in range(3):
+        assert guest.op_raise_event(10, None, send_options=SendOptions(reliable=False))
+    _service_both_until(both, lambda: any(e.code == 9 for e in host_seen.events))
+    (big,) = [e for e in host_seen.events if e.code == 9]
+    assert big.custom_data == {"blob": blob, "at": _Vector(1.5, -2.0)}
+    _service_both_until(both, lambda: any(e.code == 10 for e in host_seen.events))
 
     # Room and player properties propagate to the other client.
     assert host_room.set_custom_properties({"round": 1})
@@ -268,10 +369,14 @@ class _StatusRecorder:
         pass
 
 
-def test_peer_init_and_encryption_with_name_server() -> None:
+@pytest.mark.parametrize("protocol", PROTOCOLS)
+def test_peer_init_and_encryption_with_name_server(
+    protocol: ConnectionProtocol,
+) -> None:
     listener = _StatusRecorder()
-    peer = PhotonPeer(listener, keep_alive_interval=0.2)
-    assert peer.connect(NAME_SERVER, APP_ID)
+    peer = PhotonPeer(listener, create_transport(protocol), keep_alive_interval=0.2)
+    host = NAME_SERVER.rpartition(":")[0]
+    assert peer.connect(f"{host}:{NAME_SERVER_PORTS[protocol]}", APP_ID)
 
     deadline = time.monotonic() + TIMEOUT_SECONDS
     while peer.last_round_trip_time is None or not peer.is_encryption_available:

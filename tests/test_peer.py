@@ -41,6 +41,7 @@ from pyphotonrealtime.protocol.param.int8_slice_param import Int8SliceParameter
 from pyphotonrealtime.protocol.param.parameter_key import ParameterKey
 from pyphotonrealtime.protocol.param.string_param import StringParameter
 from pyphotonrealtime.protocol.photon_enc import generate_dh_keys
+from pyphotonrealtime.protocol.serialization_protocol import SerializationProtocol
 from pyphotonrealtime.transport import TcpTransport, Transport
 
 if TYPE_CHECKING:
@@ -79,7 +80,11 @@ class FakeServer:
             return [PhotonKeepAliveResponse(1, packet.get_client_time())]
         if isinstance(packet, InitEncryptionRequest):
             server_public, self.aes_key = generate_dh_keys(packet.get_public_key())
-            return [InitEncryptionResponse(public_key=server_public)]
+            return [
+                InitEncryptionResponse(
+                    public_key=server_public, protocol=self.parser.protocol
+                )
+            ]
         if isinstance(packet, PhotonOperationPacket):
             return self._echo(packet)
         return []
@@ -96,16 +101,21 @@ class FakeServer:
             params=dict(payload.params),
             return_code=0,
             error_message="ok",
+            protocol=self.parser.protocol,
         )
         event = PacketFactory.event(
-            event=cast_event(ECHO_EVENT), params=dict(payload.params)
+            event=cast_event(ECHO_EVENT),
+            params=dict(payload.params),
+            protocol=self.parser.protocol,
         )
         if self.aes_key is not None:
             response.set_aes_key(self.aes_key)
         return [response, event]
 
     @staticmethod
-    def disconnect_message() -> PhotonPacket:
+    def disconnect_message(
+        protocol: SerializationProtocol = SerializationProtocol.V18,
+    ) -> PhotonPacket:
         header = PhotonDataPacketHeader(command_code=CommandCode.DisconnectMessage)
         return DisconnectMessagePacket(
             header=header,
@@ -114,6 +124,7 @@ class FakeServer:
                 params={},
                 header=header,
                 response_debug_data=(0, StringParameter("bye")),
+                protocol=protocol,
             ),
         )
 

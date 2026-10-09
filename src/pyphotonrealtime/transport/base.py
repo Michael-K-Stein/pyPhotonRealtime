@@ -1,14 +1,39 @@
 """Abstract byte transport."""
 
 from abc import ABC, abstractmethod
+from enum import IntEnum
+from typing import ClassVar
+
+
+class ConnectionProtocol(IntEnum):
+    """Network protocol of a transport, with the SDKs' numeric values."""
+
+    Udp = 0
+    Tcp = 1
+    WebSocket = 4
+    WebSocketSecure = 5
 
 
 class Transport(ABC):
-    """A non-blocking byte pipe to a single Photon server.
+    """A non-blocking pipe to a single Photon server.
 
-    Transports know nothing about Photon framing; ``PhotonPeer`` feeds what
-    ``receive`` returns into a ``PhotonStreamParser``.
+    The upper edge always speaks Photon's TCP framing: ``PhotonPeer`` sends
+    and receives TCP packets (``0xFB`` + length + channel + reliability flag +
+    message, and ``0xF0`` pings) and feeds what ``receive`` returns into a
+    ``PhotonStreamParser``. Transports for other protocols translate: they
+    unwrap each packet into one of their own messages and wrap what arrives
+    back into TCP packets.
     """
+
+    protocol: ClassVar[ConnectionProtocol] = ConnectionProtocol.Tcp
+    """What the Name Server is told this client uses (``ExpectedProtocol``)."""
+    ping_with_operation: ClassVar[bool] = False
+    """Keep alive with the internal ping operation instead of ``0xF0`` packets."""
+    secure: ClassVar[bool] = False
+    """Encrypted by the transport (TLS); payload encryption is then skipped."""
+    path = ""
+    """Path of the server address (``/Master`` in ``wss://host:443/Master``);
+    set by the peer before ``connect``. Only WebSockets use it."""
 
     @abstractmethod
     def connect(self, host: str, port: int, timeout: float) -> None:

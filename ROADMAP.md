@@ -12,9 +12,9 @@ The layers follow the official SDKs, so their docs stay usable:
 RealtimeClient    (realtime/)   state machine, NS -> MS -> GS hops, rooms, callbacks
     |
 PhotonPeer        (peer.py)     service loop, op/event queues, keep-alive, timeouts, crypto
-    |
+    |                           (always speaks TCP framing to the transport)
 Transport         (transport/)  TCP | UDP (ENet-style reliability) | WebSocket(s)
-    |
+    |                           (UDP/WS translate TCP framing to their own)
 protocol/                       Protocol16/18 types, framing, DH key exchange, AES
 ```
 
@@ -62,11 +62,15 @@ separate layer and doesn't change the core.
 - [x] Master client switching; `op_custom` escape hatch
 - [x] e2e: two clients in one room exchange events and properties
 
-### M5: Protocol completeness
-- [ ] Protocol 1.8 (`SerializationProtocol.V18`), the default in v5+ SDKs; audit what's implemented today
-- [ ] Custom types registry (`PhotonPeer.RegisterType` equivalent) as a public API
-- [ ] UDP transport with reliable/unreliable channels and fragmentation
-- [ ] WebSocket(s) transport
+### M5: Protocol completeness (done)
+- [x] Protocol 1.8 (`SerializationProtocol.V18`), now the default, like v5+ SDKs; audit what's implemented today
+  - 1.6 audit: added `Int16`, `string[]` (`'a'`) and `int[]` (`'n'`); dictionaries with
+    `object` keys/values (types 0/`'*'`) now read per-entry types; custom-type arrays send
+    the type id once
+- [x] Custom types registry (`register_type`, also `PhotonPeer.register_type`) as a public API
+- [x] UDP transport with reliable/unreliable channels and fragmentation
+- [x] WebSocket(s) transport (WSS uses TLS instead of payload encryption, like the SDKs)
+- [x] e2e: every test over TCP, UDP and WSS; a UDP/1.6 client and a WSS/1.8 client share a room
 
 ### M6: Ergonomics and release
 - [ ] `asyncio` facade (`AsyncRealtimeClient`: awaitable connect/join, async event iterator)
@@ -84,6 +88,8 @@ separate layer and doesn't change the core.
 - `protocol/` is exempt from the missing-docstring rules (D100-D107) in `ruff.toml`. Document it
   and drop the exemption. Every other rule, and `mypy --strict`, already applies to it.
 - `PacketFactory.event` casts a `PhotonOperationPacket` to `PhotonEventPacket`. Construct the real type.
+- UDP: no CRC checks, datagram encryption or send-window flow control yet; region pings
+  over UDP time a TCP handshake to the same host instead of a UDP ping.
 
 ## Decision: dataclasses vs. pydantic v2
 

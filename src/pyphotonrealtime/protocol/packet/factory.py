@@ -9,6 +9,7 @@ from pyphotonrealtime.protocol.packet.operation_packet import PhotonOperationPac
 from pyphotonrealtime.protocol.packet.operation_payload import PhotonPacketPayload
 from pyphotonrealtime.protocol.param.nil_param import NilParameter
 from pyphotonrealtime.protocol.param.string_param import StringParameter
+from pyphotonrealtime.protocol.serialization_protocol import SerializationProtocol
 
 if TYPE_CHECKING:
     from pyphotonrealtime.protocol.enum_lookups import CommandParams
@@ -24,7 +25,7 @@ class PacketFactory:
         return PhotonDataPacket(header)
 
     @staticmethod
-    def operation(
+    def operation(  # noqa: PLR0913 - mirrors the wire fields
         command: (
             Literal[
                 CommandCode.Event,
@@ -39,6 +40,8 @@ class PacketFactory:
         params: CommandParams | None = None,
         return_code: int | None = None,
         error_message: str | None = None,
+        *,
+        protocol: SerializationProtocol = SerializationProtocol.V16,
     ) -> PhotonOperationPacket:
         if params is None:
             params = {}
@@ -60,17 +63,19 @@ class PacketFactory:
                 params=params,
                 header=header,
                 response_debug_data=response_debug_data,
+                protocol=protocol,
             ),
         )
 
     @staticmethod
-    def event(
+    def event(  # noqa: PLR0913 - mirrors the wire fields
         event: EventCode,
         params: CommandParams | None = None,
         return_code: int | None = None,
         error_message: str | None = None,
         *,
         encrypted: bool = False,
+        protocol: SerializationProtocol = SerializationProtocol.V16,
     ) -> PhotonEventPacket:
         return cast(
             "PhotonEventPacket",
@@ -80,6 +85,7 @@ class PacketFactory:
                 params=params,
                 return_code=return_code,
                 error_message=error_message,
+                protocol=protocol,
             ),
         )
 

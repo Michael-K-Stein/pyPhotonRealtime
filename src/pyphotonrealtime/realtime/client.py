@@ -57,8 +57,14 @@ from pyphotonrealtime.realtime.options import (
 from pyphotonrealtime.realtime.player import Player
 from pyphotonrealtime.realtime.region import Region, RegionPinger
 from pyphotonrealtime.realtime.room import Room, RoomInfo
-from pyphotonrealtime.realtime.settings import DEFAULT_MASTER_SERVER_PORT_TCP
+from pyphotonrealtime.realtime.settings import (
+    DEFAULT_MASTER_SERVER_PORT_TCP,
+    MASTER_SERVER_PORTS,
+    NAME_SERVER_PORTS,
+)
 from pyphotonrealtime.realtime.state import ClientState, DisconnectCause, ServerType
+from pyphotonrealtime.transport import create_transport
+from pyphotonrealtime.transport.base import ConnectionProtocol
 
 if TYPE_CHECKING:
     from pyphotonrealtime.peer import EventData, OperationResponse, Parameters
@@ -68,8 +74,7 @@ if TYPE_CHECKING:
     from pyphotonrealtime.realtime.settings import AppSettings
     from pyphotonrealtime.transport import Transport
 
-# ConnectionProtocol.Tcp and EncryptionMode.PayloadEncryption, sent with AuthOnce.
-_PROTOCOL_TCP = 1
+# EncryptionMode.PayloadEncryption, sent with AuthOnce.
 _PAYLOAD_ENCRYPTION = 0
 # Keys of the EncryptionData dictionary in the AuthOnce response.
 _ENCRYPTION_SECRET1 = 1
@@ -108,6 +113,16 @@ _ENTER_FAILED_CALLBACKS = {
 }
 
 
+def _delivery(send_options: SendOptions | None) -> dict[str, Any]:
+    if send_options is None:
+        return {}
+    return {
+        "encrypt": send_options.encrypt,
+        "reliable": send_options.reliable,
+        "channel": send_options.channel,
+    }
+
+
 def _byte_key(member: GamePropertyKey | ActorPropertyKey) -> Int8Parameter:
     return cast("Int8Parameter", member.value)
 
@@ -134,7 +149,8 @@ class RealtimeClient:
         """Create a client; nothing touches the network until ``connect_*``.
 
         Args:
-            transport: Byte transport for the peer; defaults to TCP.
+            transport: Transport for the peer. By default the client creates
+                one for ``AppSettings.protocol`` on every ``connect_*``.
         """
         self.state = ClientState.PeerCreated
         self.server = ServerType.NameServer
@@ -144,6 +160,7 @@ class RealtimeClient:
         """Set before connecting to send a user id or use custom authentication."""
 
         self.peer = PhotonPeer(listener=self, transport=transport)
+        self._own_transport = transport is None
         self.local_player = Player(actor_number=-1, is_local=True, client=self)
         self.current_room: Room | None = None
         self.room_list: dict[str, RoomInfo] = {}
@@ -172,6 +189,11 @@ class RealtimeClient:
         self._enter: _EnterRoom | None = None
         self._last_room: str | None = None
         self._friends_requested: list[str] = []
+
+    @property
+    def protocol(self) -> ConnectionProtocol:
+        """Network protocol of the current transport."""
+        return self.peer.transport.protocol
 
     # -- callbacks --------------------------------------------------------
 
@@ -216,6 +238,8 @@ class RealtimeClient:
         if self.peer.state != PeerState.Disconnected:
             return False
         self.settings = settings
+        if self._own_transport and self.peer.transport.protocol != settings.protocol:
+            self.peer.transport = create_transport(settings.protocol)
         self.cloud_region = settings.fixed_region
         self.regions = []
         self._token = None
@@ -223,16 +247,15 @@ class RealtimeClient:
         if self.auth_values is not None:
             self.auth_values.token = None
         if settings.use_name_server:
-            self.name_server_address = (
-                f"{settings.name_server}:{settings.name_server_port}"
-            )
+            port = settings.name_server_port or NAME_SERVER_PORTS[self.protocol]
+            self.name_server_address = f"{settings.name_server}:{port}"
             return self._start_connection(
                 ServerType.NameServer, self.name_server_address
             )
         if not settings.server:
             msg = "use_name_server=False needs AppSettings.server"
             raise ValueError(msg)
-        port = settings.port or DEFAULT_MASTER_SERVER_PORT_TCP
+        port = settings.port or MASTER_SERVER_PORTS[self.protocol]
         self.master_server_address = f"{settings.server}:{port}"
         return self._start_connection(
             ServerType.MasterServer, self.master_server_address
@@ -633,11 +656,10 @@ class RealtimeClient:
         Returns:
             Whether the operation was queued.
         """
-        encrypt = send_options is not None and send_options.encrypt
         return self.peer.send_operation(
             operation_code,
             {key: to_param(value) for key, value in parameters.items()},
-            encrypt=encrypt,
+            **_delivery(send_options),
         )
 
     def _send_in_room(
@@ -648,8 +670,7 @@ class RealtimeClient:
     ) -> bool:
         if not self.in_room:
             return False
-        encrypt = send_options is not None and send_options.encrypt
-        return self.peer.send_operation(operation, params, encrypt=encrypt)
+        return self.peer.send_operation(operation, params, **_delivery(send_options))
 
     def _set_properties(
         self,
@@ -798,7 +819,9 @@ class RealtimeClient:
         operation = OperationCode.Authenticate
         if self.server == ServerType.NameServer and self.auth_mode == AuthMode.AuthOnce:
             operation = OperationCode.AuthOnce
-            params[ParameterKey.ExpectedProtocol] = Int8Parameter(_PROTOCOL_TCP)
+            params[ParameterKey.ExpectedProtocol] = Int8Parameter(
+                self.peer.transport.protocol
+            )
             params[ParameterKey.EncryptionMode] = Int8Parameter(_PAYLOAD_ENCRYPTION)
         self.peer.send_operation(operation, params, encrypt=True)
 
@@ -864,7 +887,13 @@ class RealtimeClient:
         ]
         self._emit("on_region_list_received", {r.code: r.address for r in self.regions})
         if not self.cloud_region and self.state == ClientState.ConnectedToNameServer:
-            self._pinger = RegionPinger(self.regions)
+            self._pinger = RegionPinger(
+                self.regions,
+                # UDP servers listen for TCP too; time the TCP handshake there.
+                port=DEFAULT_MASTER_SERVER_PORT_TCP
+                if self.protocol == ConnectionProtocol.Udp
+                else None,
+            )
 
     def _on_regions_pinged(self, pinger: RegionPinger) -> None:
         self._pinger = None

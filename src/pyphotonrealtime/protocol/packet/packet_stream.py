@@ -3,7 +3,7 @@ from __future__ import annotations
 from io import BytesIO
 from typing import TYPE_CHECKING
 
-from pyphotonrealtime.protocol.command_code import CommandCode
+from pyphotonrealtime.protocol.command_code import CommandCode, InternalOperationCode
 from pyphotonrealtime.protocol.packet.base import PhotonPacket
 from pyphotonrealtime.protocol.packet.disconnect import DisconnectMessagePacket
 from pyphotonrealtime.protocol.packet.format import PacketFormat
@@ -18,6 +18,7 @@ from pyphotonrealtime.protocol.packet.key_exchange import (
     InitEncryptionResponse,
 )
 from pyphotonrealtime.protocol.packet.operation_packet import PhotonOperationPacket
+from pyphotonrealtime.protocol.serialization_protocol import SerializationProtocol
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -34,9 +35,13 @@ class PhotonStreamParser:
     # disconnecting valid clients because of overly strict packet limits.
     MAX_PACKET_LENGTH = 16 * 1024 * 1024
 
-    def __init__(self) -> None:
+    def __init__(
+        self, protocol: SerializationProtocol = SerializationProtocol.V16
+    ) -> None:
         # This persistent buffer survives across multiple socket.recv() calls
         self.buffer = bytearray()
+        self.protocol = protocol
+        """Serialization of operation payloads; follows a parsed init request."""
 
     def feed(self, new_data: bytes) -> None:
         self.buffer.extend(new_data)
@@ -136,7 +141,10 @@ class PhotonStreamParser:
     def _handle_data_init_packet(
         self, header: PhotonDataPacketHeader, data: BytesIO
     ) -> InitRequestPacket:
-        return InitRequestPacket.from_bytes(data, header=header)
+        packet = InitRequestPacket.from_bytes(data, header=header)
+        # Server side: the client picks the protocol for the whole connection.
+        self.protocol = packet.serialization_protocol
+        return packet
 
     def _handle_data_init_response_packet(
         self, header: PhotonDataPacketHeader, data: BytesIO
@@ -151,16 +159,19 @@ class PhotonStreamParser:
     ) -> PhotonOperationPacket:
         if header.get_command_code() == CommandCode.DisconnectMessage:
             return DisconnectMessagePacket.from_bytes(
-                data, header=header, aes_key=aes_key
+                data, header=header, aes_key=aes_key, protocol=self.protocol
             )
 
-        if header.get_command_code() == CommandCode.KeyExchangeRequest:
-            return InitEncryptionRequest.from_bytes(
-                data, header=header, aes_key=aes_key
-            )
-        if header.get_command_code() == CommandCode.KeyExchangeResponse:
-            return InitEncryptionResponse.from_bytes(
-                data, header=header, aes_key=aes_key
-            )
-
-        return PhotonOperationPacket.from_bytes(data, header=header, aes_key=aes_key)
+        packet = PhotonOperationPacket.from_bytes(
+            data, header=header, aes_key=aes_key, protocol=self.protocol
+        )
+        # Internal operations: the key exchange (code 0) or a ping (code 1).
+        if (
+            int(packet.get_payload().operation_code)
+            == InternalOperationCode.InitEncryption
+        ):
+            if header.get_command_code() == CommandCode.KeyExchangeRequest:
+                return InitEncryptionRequest.from_operation(packet)
+            if header.get_command_code() == CommandCode.KeyExchangeResponse:
+                return InitEncryptionResponse.from_operation(packet)
+        return packet

@@ -7,6 +7,11 @@ from typing import TYPE_CHECKING, cast
 from pyphotonrealtime.protocol.command_code import CommandCode
 from pyphotonrealtime.protocol.operation_code import OperationCode
 from pyphotonrealtime.protocol.param.read_param import read_parameter
+from pyphotonrealtime.protocol.protocol18 import (
+    read_parameter_table,
+    read_response_header,
+)
+from pyphotonrealtime.protocol.serialization_protocol import SerializationProtocol
 
 if TYPE_CHECKING:
     from typing import Any
@@ -19,6 +24,7 @@ if TYPE_CHECKING:
 def deserialize_photon_payload(
     header: PhotonDataPacketHeader,
     data: bytes,
+    protocol: SerializationProtocol = SerializationProtocol.V16,
 ) -> tuple[
     OperationCode,
     dict[ParameterKey, ParameterBase[Any]],
@@ -37,6 +43,16 @@ def deserialize_photon_payload(
     operation_code = OperationCode.DiffieHellmanRequest
     if not skip_operation_code:
         operation_code = cast("OperationCode", struct.unpack(">B", stream.read(1))[0])
+
+    if protocol == SerializationProtocol.V18:
+        debug = read_response_header(stream) if is_response else None
+        return (
+            operation_code,
+            cast(
+                "dict[ParameterKey, ParameterBase[Any]]", read_parameter_table(stream)
+            ),
+            debug,
+        )
 
     response_debug_data = None
     if is_response:

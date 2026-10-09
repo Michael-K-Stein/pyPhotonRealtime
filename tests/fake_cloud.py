@@ -76,7 +76,11 @@ class FakeServer:
             return [InitResponsePacket()]
         if isinstance(packet, InitEncryptionRequest):
             server_public, self.aes_key = generate_dh_keys(packet.get_public_key())
-            return [InitEncryptionResponse(public_key=server_public)]
+            return [
+                InitEncryptionResponse(
+                    public_key=server_public, protocol=self.parser.protocol
+                )
+            ]
         if isinstance(packet, PhotonOperationPacket):
             payload = packet.get_payload()
             encrypted = packet.get_header().is_encrypted()
@@ -91,6 +95,7 @@ class FakeServer:
                 params=params,
                 return_code=return_code,
                 error_message="nope" if return_code else None,
+                protocol=self.parser.protocol,
             )
             if self.aes_key is not None:
                 response.set_aes_key(self.aes_key)
@@ -146,7 +151,10 @@ class FakeCloud(Transport):
 
     def push_event(self, code: int, params: CommandParams) -> None:
         """Deliver an event from the current server on the next receive."""
-        event = PacketFactory.event(cast("EventCode", code), params)
+        assert self.current is not None
+        event = PacketFactory.event(
+            cast("EventCode", code), params, protocol=self.current.parser.protocol
+        )
         self.inbox += event.serialize()
 
     @override

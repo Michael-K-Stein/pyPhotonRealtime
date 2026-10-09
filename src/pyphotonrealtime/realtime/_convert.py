@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from pyphotonrealtime.protocol.custom_types import (
+    custom_type_for_code,
+    custom_type_for_value,
+)
 from pyphotonrealtime.protocol.param.base import ArrayParameterBase, ParameterBase
 from pyphotonrealtime.protocol.param.bool_param import BooleanParameter
+from pyphotonrealtime.protocol.param.custom_param import CustomParameter
 from pyphotonrealtime.protocol.param.dictionary_param_base import (
     DictionaryParameterBase,
 )
@@ -37,6 +42,10 @@ def to_python(param: ParameterBase[Any]) -> Any:  # noqa: ANN401
         return {to_python(k): to_python(v) for k, v in param.items()}
     if isinstance(param, ArrayParameterBase):
         return [to_python(element) for element in param]
+    if isinstance(param, CustomParameter):
+        custom = custom_type_for_code(param.value["id"])
+        if custom is not None:
+            return custom.deserialize(param.value["data"])
     return param.value
 
 
@@ -44,7 +53,8 @@ def to_param(value: object) -> ParameterBase[Any]:
     """Wrap a plain value: ``dict`` -> Hashtable, ``list`` -> object array.
 
     ``int`` becomes Int32 (Int64 when it doesn't fit) and ``float`` becomes
-    Double; pass a ``*Parameter`` to pick the wire type yourself.
+    Double; instances of types passed to ``register_type`` become custom
+    types. Pass a ``*Parameter`` to pick the wire type yourself.
 
     Returns:
         The parameter.
@@ -56,6 +66,8 @@ def to_param(value: object) -> ParameterBase[Any]:
             return to_hashtable(value)
         case list() | tuple():
             return ObjectSliceParameter([to_param(v) for v in value])
+        case _ if (custom := custom_type_for_value(value)) is not None:
+            return CustomParameter({"id": custom.code, "data": custom.serialize(value)})
         case _:
             return _scalar_param(value)
 

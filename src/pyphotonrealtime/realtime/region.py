@@ -7,6 +7,8 @@ import socket
 import time
 from dataclasses import dataclass
 
+from pyphotonrealtime.peer import split_address
+
 
 @dataclass(slots=True)
 class Region:
@@ -30,18 +32,19 @@ class Region:
 
 
 class _Probe:
-    def __init__(self, region: Region, attempts: int) -> None:
+    def __init__(self, region: Region, attempts: int, port: int | None) -> None:
         self.region = region
         self.attempts_left = attempts
+        self.port = port
         self.sock: socket.socket | None = None
         self.started = 0.0
 
     def start(self, now: float) -> None:
         self.attempts_left -= 1
-        host, _, port = self.region.address.rpartition(":")
         try:
+            host, port, _ = split_address(self.region.address)
             family, kind, proto, _, sockaddr = socket.getaddrinfo(
-                host.strip("[]"), int(port), type=socket.SOCK_STREAM
+                host, self.port or port, type=socket.SOCK_STREAM
             )[0]
             sock = socket.socket(family, kind, proto)
         except (OSError, ValueError):
@@ -70,12 +73,24 @@ class RegionPinger:
     """
 
     def __init__(
-        self, regions: list[Region], *, attempts: int = 2, timeout: float = 2.0
+        self,
+        regions: list[Region],
+        *,
+        attempts: int = 2,
+        timeout: float = 2.0,
+        port: int | None = None,
     ) -> None:
-        """Prepare to ping ``regions``; nothing is sent before the first ``poll``."""
+        """Prepare to ping ``regions``; nothing is sent before the first ``poll``.
+
+        Args:
+            regions: Regions to ping; their ``ping`` is filled in.
+            attempts: Pings per region; the best one counts.
+            timeout: Seconds before a ping counts as lost.
+            port: TCP port to ping instead of the one in each address.
+        """
         self.regions = regions
         self.timeout = timeout
-        self._probes = [_Probe(region, attempts) for region in regions]
+        self._probes = [_Probe(region, attempts, port) for region in regions]
 
     def poll(self) -> bool:
         """Advance the pings.

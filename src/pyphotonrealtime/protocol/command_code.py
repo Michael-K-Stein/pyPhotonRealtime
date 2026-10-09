@@ -13,6 +13,9 @@ class CommandCode(IntEnum):
 
     KeyExchangeRequest = 6
     KeyExchangeResponse = 7
+    # Internal operations; the key exchange is one of them.
+    InternalOperationRequest = 6
+    InternalOperationResponse = 7
 
     Message = 8
     RawMessage = 9
@@ -23,6 +26,14 @@ class CommandCode(IntEnum):
     EncryptedEvent = 0x84
 
     Unknown = 0xFF
+
+
+class InternalOperationCode(IntEnum):
+    """Operation codes of internal operations (``PhotonCodes`` in the SDKs)."""
+
+    InitEncryption = 0
+    Ping = 1
+    """Keep-alive over WebSockets, which can't send TCP's ping packets."""
 
 
 ENCRYPTED_FLAG = 0x80

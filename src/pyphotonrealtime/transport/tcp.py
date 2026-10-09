@@ -1,9 +1,18 @@
 """Plain TCP transport (Photon's ``ConnectionProtocol.Tcp``)."""
 
 import socket
+import ssl
 from typing import override
 
 from pyphotonrealtime.transport.base import Transport
+
+# Also what a non-blocking TLS socket raises when it needs more traffic.
+_WOULD_BLOCK = (
+    BlockingIOError,
+    InterruptedError,
+    ssl.SSLWantReadError,
+    ssl.SSLWantWriteError,
+)
 
 
 class TcpTransport(Transport):
@@ -24,9 +33,18 @@ class TcpTransport(Transport):
     def connect(self, host: str, port: int, timeout: float) -> None:
         sock = socket.create_connection((host, port), timeout=timeout)
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        sock = self._wrap(sock, host)
         sock.settimeout(0.0)  # Non-blocking from here on.
         self._sock = sock
         self._send_buffer.clear()
+
+    def _wrap(self, sock: socket.socket, host: str) -> socket.socket:  # noqa: ARG002
+        """Hook for subclasses to layer TLS over the connected socket.
+
+        Returns:
+            The socket to use.
+        """
+        return sock
 
     @override
     def send(self, data: bytes) -> None:
@@ -43,7 +61,7 @@ class TcpTransport(Transport):
         while self._send_buffer:
             try:
                 sent = self._sock.send(self._send_buffer)
-            except (BlockingIOError, InterruptedError):
+            except _WOULD_BLOCK:
                 break
             del self._send_buffer[:sent]
         return bool(self._send_buffer)
@@ -56,7 +74,7 @@ class TcpTransport(Transport):
         while True:
             try:
                 chunk = self._sock.recv(self.RECV_CHUNK)
-            except (BlockingIOError, InterruptedError):
+            except _WOULD_BLOCK:
                 break
             if not chunk:
                 self.close()

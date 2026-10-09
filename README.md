@@ -43,7 +43,7 @@ client = RealtimeClient()
 client.add_callback_target(Bot(client))
 client.connect_using_settings(
     AppSettings(app_id_realtime="<your app id>", fixed_region="eu")
-)
+)  # protocol=ConnectionProtocol.Udp / WebSocketSecure for the other transports
 
 while True:
     client.service()  # nothing happens on the wire without this
@@ -54,10 +54,33 @@ while True:
 
 | Package | Role |
 |---|---|
-| `pyphotonrealtime.protocol` | Wire format: typed parameters, packet framing, DH/AES |
-| `pyphotonrealtime.transport` | Byte transports (TCP; UDP/WebSocket planned) |
+| `pyphotonrealtime.protocol` | Wire format: typed parameters (Protocol 1.6 and 1.8), custom types, packet framing, DH/AES |
+| `pyphotonrealtime.transport` | Transports: TCP, UDP (reliable/unreliable channels, fragmentation), WebSocket(s) |
 | `pyphotonrealtime.peer` | `PhotonPeer`: one connection, the service loop, keep-alive, encryption |
 | `pyphotonrealtime.realtime` | `RealtimeClient`: Name/Master/Game server workflow, rooms, players, callbacks |
+
+## Protocols
+
+Serialization defaults to Protocol 1.8, like the current SDKs; set
+`client.peer.serialization_protocol = SerializationProtocol.V16` for 1.6. Clients on
+either protocol and any transport can share a room. `SendOptions(reliable=False,
+channel=1)` only changes anything over UDP. Over WSS, TLS replaces payload encryption,
+as in the SDKs.
+
+Your own classes can travel as Photon custom types:
+
+```python
+import struct
+from pyphotonrealtime import register_type
+
+register_type(
+    Vector2,
+    code=ord("W"),
+    serialize=lambda v: struct.pack(">ff", v.x, v.y),
+    deserialize=lambda data: Vector2(*struct.unpack(">ff", data)),
+)
+client.op_raise_event(1, {"at": Vector2(1, 2)})  # arrives as a Vector2
+```
 
 ## Development
 

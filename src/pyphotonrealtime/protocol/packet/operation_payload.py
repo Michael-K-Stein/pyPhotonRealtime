@@ -9,6 +9,7 @@ from pyphotonrealtime.protocol.deserializer import deserialize_photon_payload
 from pyphotonrealtime.protocol.enum_lookups import get_operation_name
 from pyphotonrealtime.protocol.param.nil_param import NilParameter
 from pyphotonrealtime.protocol.param.string_param import StringParameter
+from pyphotonrealtime.protocol.serialization_protocol import SerializationProtocol
 from pyphotonrealtime.protocol.serializer import serialize_photon_payload
 
 if TYPE_CHECKING:
@@ -44,24 +45,30 @@ class PhotonPacketPayload:
         params: CommandParams,
         header: PhotonDataPacketHeader,
         response_debug_data: tuple[int, ParameterBase[Any]] | None = None,
+        protocol: SerializationProtocol = SerializationProtocol.V16,
     ) -> None:
         self.operation_code = operation_code
         self.params = params
         self.response_debug_data = response_debug_data
         self.header = header
+        self.protocol = protocol
         self._cached_serialized: bytes | None = None
 
     @staticmethod
-    def from_bytes(header: PhotonDataPacketHeader, data: bytes) -> PhotonPacketPayload:
+    def from_bytes(
+        header: PhotonDataPacketHeader,
+        data: bytes,
+        protocol: SerializationProtocol = SerializationProtocol.V16,
+    ) -> PhotonPacketPayload:
         operation_code, params, response_debug_data = deserialize_photon_payload(
-            header,
-            data,
+            header, data, protocol
         )
         return PhotonPacketPayload(
             operation_code=operation_code,
             params=params,
             response_debug_data=response_debug_data,
             header=header,
+            protocol=protocol,
         )
 
     def serialize(self) -> bytes:
@@ -73,6 +80,7 @@ class PhotonPacketPayload:
             self.params,
             self.response_debug_data,
             header=self.header,
+            protocol=self.protocol,
         )
         self._cached_serialized = serialized_data
         return serialized_data
@@ -112,9 +120,15 @@ class PhotonPacketEncryptedPayload:
         packet.header = header
         return packet
 
-    def decrypt(self, aes_key: bytes) -> PhotonPacketPayload:
+    def decrypt(
+        self,
+        aes_key: bytes,
+        protocol: SerializationProtocol = SerializationProtocol.V16,
+    ) -> PhotonPacketPayload:
         plaintext = _decrypt_data(self.raw, aes_key)
-        return PhotonPacketPayload.from_bytes(header=self.header, data=plaintext)
+        return PhotonPacketPayload.from_bytes(
+            header=self.header, data=plaintext, protocol=protocol
+        )
 
     @staticmethod
     def encrypt(
