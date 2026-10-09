@@ -124,7 +124,7 @@ class _Recorder(InRoomCallbacks, OnEventCallback):
 @pytest.fixture(scope="module")
 def demo_exe() -> Path:
     try:
-        return build_demo()
+        return build_demo("demo_loadBalancing")
     except DemoUnavailableError as exc:
         pytest.skip(str(exc))
 
@@ -158,7 +158,7 @@ def _service_until(client: RealtimeClient, done: Callable[[], bool]) -> None:
     deadline = time.monotonic() + TIMEOUT_SECONDS
     while not done():
         if time.monotonic() > deadline:
-            pytest.fail(f"timed out in {client.state}")
+            pytest.fail(f"timed out in {client.state} ({client.disconnect_cause})")
         client.service()
         time.sleep(1 / 30)
 
