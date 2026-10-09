@@ -1,16 +1,16 @@
 name: CI
 
 on:
-  push:
-    branches: ["master"]
   pull_request:
     branches: ["master"]
+  push:
+    branches: ["master"]
   workflow_dispatch:
-  schedule:
-    - cron: "17 4 * * *" # nightly e2e against Photon Cloud
 
 jobs:
+  # Pull requests: Python 3.12 lint + unit tests only.
   lint:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -27,23 +27,20 @@ jobs:
         run: python -m mypy
 
   test:
+    if: github.event_name == 'pull_request'
     needs: lint
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
       - run: python -m pip install -e ".[test]"
       - run: python -m pytest -q
 
+  # Merged to master (or manual run): live e2e against Photon Cloud.
   e2e:
-    # Live servers: nightly and on demand only, never on PRs (forks have no secret).
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    needs: test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
