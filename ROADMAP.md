@@ -42,15 +42,16 @@ separate layer and doesn't change the core.
 - [x] Buffer partial TCP writes (`TcpTransport.send` currently blocks)
 
 ### M2: RealtimeClient connection workflow
-- [ ] Name Server: `OpGetRegions`, `OpAuthenticate` / `AuthOnce`, region pinging
-- [ ] Master Server hop with token; direct-master mode (`use_name_server=False`)
-- [ ] Disconnect causes, `reconnect_and_rejoin`
-- [ ] Custom authentication (`AuthenticationValues`)
-- [ ] e2e: Name Server -> Master Server against Photon Cloud (`tests/e2e`, currently xfail)
+- [x] Name Server: `OpGetRegions`, `OpAuthenticate` / `AuthOnce`, region pinging (TCP connect time)
+- [x] Master Server hop with token; direct-master mode (`use_name_server=False`)
+- [x] Disconnect causes, `reconnect_to_master`
+- [x] Custom authentication (`AuthenticationValues`; post data as `str` or `bytes`)
+- [ ] e2e: Name Server -> Master Server against Photon Cloud (written; first run is on master CI)
 
 ### M3: Matchmaking and lobbies
 - [ ] Join/leave lobby, room list and `GameListUpdate` events, lobby stats
 - [ ] Create / Join / JoinOrCreate / JoinRandom / Rejoin, then the Game Server hop
+- [ ] `reconnect_and_rejoin` (needs the Game Server hop)
 - [ ] `OpFindFriends`, expected users, SQL lobby filters
 
 ### M4: In-room
