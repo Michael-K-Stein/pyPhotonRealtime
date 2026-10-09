@@ -31,15 +31,15 @@ separate layer and doesn't change the core.
 - [x] Packaging (`pyproject.toml`, src layout, `py.typed`), Python 3.12+
 - [x] CI: ruff `ALL` (pinned), `mypy --strict`, pytest on 3.12-3.14, nightly e2e job
 
-### M1: PhotonPeer over TCP
-- [ ] `connect`: send `InitRequest`, handle `InitResponse`, status callbacks
-- [ ] `send_operation` / `dispatch_incoming_commands` into `OperationResponse` / `EventData`
-- [ ] Keep-alive (client-initiated pings) and disconnect timeout
-- [ ] `establish_encryption` (DH via `photon_enc`), encrypted ops (AES-CBC)
-- [ ] Traffic stats and round-trip time
-- [ ] Tests against a fake in-process server (reuse PA server's server-side code as a fixture)
-- [ ] First e2e test passing: TCP connect + Init to `ns.photonengine.io`
-- [ ] Buffer partial TCP writes (`TcpTransport.send` currently blocks)
+### M1: PhotonPeer over TCP (done)
+- [x] `connect`: send `InitRequest`, handle `InitResponse`, status callbacks
+- [x] `send_operation` / `dispatch_incoming_commands` into `OperationResponse` / `EventData`
+- [x] Keep-alive (client-initiated pings) and disconnect timeout
+- [x] `establish_encryption` (DH via `photon_enc`), encrypted ops (AES-CBC)
+- [x] Traffic stats and round-trip time
+- [x] Tests against a fake in-process server (reuse PA server's server-side code as a fixture)
+- [x] First e2e test passing: TCP connect + Init to `ns.photonengine.io`
+- [x] Buffer partial TCP writes (`TcpTransport.send` currently blocks)
 
 ### M2: RealtimeClient connection workflow
 - [ ] Name Server: `OpGetRegions`, `OpAuthenticate` / `AuthOnce`, region pinging

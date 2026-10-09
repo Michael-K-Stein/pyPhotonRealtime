@@ -18,6 +18,14 @@ class Transport(ABC):
     def send(self, data: bytes) -> None:
         """Queue ``data`` for sending. Must not block on a slow peer."""
 
+    def flush(self) -> bool:
+        """Write as much queued data as the connection accepts right now.
+
+        Returns:
+            Whether data is still waiting to be written.
+        """
+        return False
+
     @abstractmethod
     def receive(self) -> bytes:
         """Return whatever bytes are available right now (``b""`` if none)."""
