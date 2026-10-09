@@ -1,3 +1,5 @@
+"""Abstract byte transport."""
+
 from abc import ABC, abstractmethod
 
 
@@ -26,4 +28,5 @@ class Transport(ABC):
 
     @property
     @abstractmethod
-    def connected(self) -> bool: ...
+    def connected(self) -> bool:
+        """Whether the connection is currently open."""

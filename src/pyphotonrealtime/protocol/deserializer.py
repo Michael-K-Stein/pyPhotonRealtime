@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import struct
 from io import BytesIO
-from typing import TYPE_CHECKING, Dict, Tuple, cast
+from typing import TYPE_CHECKING, cast
 
 from pyphotonrealtime.protocol.command_code import CommandCode
 from pyphotonrealtime.protocol.operation_code import OperationCode
-from pyphotonrealtime.protocol.param.parameter_key import ParameterKey
 from pyphotonrealtime.protocol.param.read_param import read_parameter
 
 if TYPE_CHECKING:
@@ -12,15 +13,16 @@ if TYPE_CHECKING:
 
     from pyphotonrealtime.protocol.packet.header import PhotonDataPacketHeader
     from pyphotonrealtime.protocol.param.base import ParameterBase
+    from pyphotonrealtime.protocol.param.parameter_key import ParameterKey
 
 
 def deserialize_photon_payload(
-    header: "PhotonDataPacketHeader",
+    header: PhotonDataPacketHeader,
     data: bytes,
-) -> Tuple[
-    "OperationCode",
-    Dict["ParameterKey", "ParameterBase[Any]"],
-    Tuple[int, "ParameterBase[Any]"] | None,
+) -> tuple[
+    OperationCode,
+    dict[ParameterKey, ParameterBase[Any]],
+    tuple[int, ParameterBase[Any]] | None,
 ]:
     stream = BytesIO(data)
 
@@ -34,7 +36,7 @@ def deserialize_photon_payload(
 
     operation_code = OperationCode.DiffieHellmanRequest
     if not skip_operation_code:
-        operation_code = cast(OperationCode, struct.unpack(">B", stream.read(1))[0])
+        operation_code = cast("OperationCode", struct.unpack(">B", stream.read(1))[0])
 
     response_debug_data = None
     if is_response:
@@ -46,12 +48,12 @@ def deserialize_photon_payload(
 
     param_count = struct.unpack(">h", stream.read(2))[0]
 
-    params: Dict[ParameterKey, ParameterBase[Any]] = {}
+    params: dict[ParameterKey, ParameterBase[Any]] = {}
     for _ in range(param_count):
         key_bytes = stream.read(1)
         if not key_bytes:
             break
-        param_key = cast(ParameterKey, struct.unpack(">B", key_bytes)[0])
+        param_key = cast("ParameterKey", struct.unpack(">B", key_bytes)[0])
 
         params[param_key] = read_parameter(stream)
 

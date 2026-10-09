@@ -1,35 +1,43 @@
-from typing import Any, Dict, Iterator, Optional, Tuple, TypeVar
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from pyphotonrealtime.protocol.param.base import ParameterBase
 
-K = TypeVar("K", bound=ParameterBase[Any])
-V = TypeVar("V", bound=ParameterBase[Any])
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
-class DictionaryParameterBase(ParameterBase[Dict[K, V]]):
-    value: Dict[K, V]
+class DictionaryParameterBase[K: ParameterBase[Any], V: ParameterBase[Any]](
+    ParameterBase[dict[K, V]]
+):
+    value: dict[K, V]
 
-    def __init__(self, initial_dict: Optional[Dict[K, V]] = None):
+    def __init__(self, initial_dict: dict[K, V] | None = None) -> None:
         self.value = initial_dict if initial_dict is not None else {}
 
     def __getitem__(self, key: K) -> V:
         if not isinstance(key, ParameterBase):
-            raise TypeError("Key must be derived from ParameterBase!")
+            msg = "Key must be derived from ParameterBase!"
+            raise TypeError(msg)
         return self.value[key]
 
     def __setitem__(self, key: K, value: V) -> None:
         if not isinstance(key, ParameterBase):
-            raise TypeError("Key must be derived from ParameterBase!")
+            msg = "Key must be derived from ParameterBase!"
+            raise TypeError(msg)
         if not isinstance(value, ParameterBase):
-            raise TypeError("Value must be derived from ParameterBase!")
+            msg = "Value must be derived from ParameterBase!"
+            raise TypeError(msg)
         self.value[key] = value
 
     def __delitem__(self, key: K) -> None:
         if not isinstance(key, ParameterBase):
-            raise TypeError("Key must be derived from ParameterBase!")
+            msg = "Key must be derived from ParameterBase!"
+            raise TypeError(msg)
         del self.value[key]
 
-    def __contains__(self, key: Any) -> bool:
+    def __contains__(self, key: object) -> bool:
         return key in self.value
 
     def __len__(self) -> int:
@@ -44,12 +52,13 @@ class DictionaryParameterBase(ParameterBase[Dict[K, V]]):
     def values(self) -> Iterator[V]:
         return iter(self.value.values())
 
-    def items(self) -> Iterator[Tuple[K, V]]:
+    def items(self) -> Iterator[tuple[K, V]]:
         return iter(self.value.items())
 
-    def get(self, key: K, default: Optional[V] = None) -> Optional[V]:
+    def get(self, key: K, default: V | None = None) -> V | None:
         if not isinstance(key, ParameterBase):
-            raise TypeError("Key must be derived from ParameterBase!")
+            msg = "Key must be derived from ParameterBase!"
+            raise TypeError(msg)
         return self.value.get(key, default)
 
     def __repr__(self) -> str:

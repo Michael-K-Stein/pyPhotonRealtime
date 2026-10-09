@@ -1,11 +1,18 @@
-from io import BytesIO
+from __future__ import annotations
+
 from struct import Struct, pack
-from typing import Optional, cast
+from typing import TYPE_CHECKING, Self, cast
 
 from pyphotonrealtime.protocol.command_code import CommandCode
 from pyphotonrealtime.protocol.packet.base import PhotonDataPacket
 from pyphotonrealtime.protocol.packet.header import PhotonDataPacketHeader
 from pyphotonrealtime.protocol.serialization_protocol import SerializationProtocol
+
+if TYPE_CHECKING:
+    from io import BytesIO
+
+# App ids travel as 32 hex chars (a UUID without dashes).
+APP_ID_LENGTH = 32
 
 
 class InitRequestPacket(PhotonDataPacket):
@@ -14,15 +21,16 @@ class InitRequestPacket(PhotonDataPacket):
     app_id: str
     sdk_id: int
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - mirrors the wire fields
         self,
         app_id: str,
+        *,
         ip_protocol: int = 1,
         serialization_protocol: SerializationProtocol = SerializationProtocol.V6,
         sdk_id: int = 17,
         sdk_version: str = "4.1.11.0",
-        header: Optional[PhotonDataPacketHeader] = None,
-    ):
+        header: PhotonDataPacketHeader | None = None,
+    ) -> None:
         if header is None:
             header = PhotonDataPacketHeader(command_code=CommandCode.Init)
         super().__init__(header)
@@ -37,10 +45,11 @@ class InitRequestPacket(PhotonDataPacket):
         cls,
         data: BytesIO,
         *,
-        header: Optional[PhotonDataPacketHeader] = None,
-    ):
+        header: PhotonDataPacketHeader | None = None,
+    ) -> Self:
         if header is not None and header.get_command_code() != CommandCode.Init:
-            raise TypeError("Packet header is not of a init request!")
+            msg = "Packet header is not of a init request!"
+            raise TypeError(msg)
 
         # Byte 0: IP Protocol (1)
         # Byte 1: Serialization Protocol (6)
@@ -58,25 +67,24 @@ class InitRequestPacket(PhotonDataPacket):
 
         version_string = f"{major_version}.{minor_version}.{patch}.{build}"
 
-        app_id = data.read(32)
-        if len(app_id) != 32:
-            raise ValueError("AppId is not 32 bytes!")
+        app_id = data.read(APP_ID_LENGTH)
+        if len(app_id) != APP_ID_LENGTH:
+            msg = "AppId is not 32 bytes!"
+            raise ValueError(msg)
 
         return cls(
             app_id=app_id.decode(),
             sdk_id=sdk_id,
             sdk_version=version_string,
-            serialization_protocol=cast(SerializationProtocol, serialization_version),
+            serialization_protocol=cast("SerializationProtocol", serialization_version),
             ip_protocol=ip_protocol,
             header=header,
         )
 
     def serialize(self) -> bytes:
-        parts = self.sdk_version.split(".")
-        major = int(parts[0]) if len(parts) > 0 else 0
-        minor = int(parts[1]) if len(parts) > 1 else 0
-        patch = int(parts[2]) if len(parts) > 2 else 0
-        build = int(parts[3]) if len(parts) > 3 else 0
+        # "major.minor.patch.build"; missing trailing components default to 0.
+        parts = [int(part) for part in self.sdk_version.split(".")]
+        major, minor, patch, build = [*parts, 0, 0, 0, 0][:4]
         major_minor = (major << 4) | (minor & 0x0F)
 
         payload_header = pack(
@@ -97,7 +105,7 @@ class InitRequestPacket(PhotonDataPacket):
 
 
 class InitResponsePacket(PhotonDataPacket):
-    def __init__(self, header: Optional[PhotonDataPacketHeader] = None):
+    def __init__(self, header: PhotonDataPacketHeader | None = None) -> None:
         if header is None:
             header = PhotonDataPacketHeader(command_code=CommandCode.InitResponse)
         super().__init__(header)
@@ -107,13 +115,16 @@ class InitResponsePacket(PhotonDataPacket):
         cls,
         data: BytesIO,
         *,
-        header: Optional[PhotonDataPacketHeader] = None,
-    ):
+        header: PhotonDataPacketHeader | None = None,
+    ) -> Self:
         if header is not None and header.get_command_code() != CommandCode.InitResponse:
-            raise TypeError("Packet header is not of a init response!")
+            msg = "Packet header is not of a init response!"
+            raise TypeError(msg)
 
         content = data.read(1)
-        assert content == b"\x00", f"Unexpected data in InitResponse! Got {content}"
+        if content != b"\x00":
+            msg = f"Unexpected data in InitResponse! Got {content!r}"
+            raise ValueError(msg)
 
         return cls(header)
 

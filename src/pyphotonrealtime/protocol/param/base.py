@@ -1,63 +1,64 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from io import BytesIO
-from typing import Any, Generic, Iterator, List, Optional, Sequence, TypeVar
+from typing import TYPE_CHECKING, Any, Self
 
-V = TypeVar("V")
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
+    from io import BytesIO
 
 
-class ParameterBase(ABC, Generic[V]):
+class ParameterBase[V](ABC):
     """Base class for all Photon parameters."""
 
     value: V
 
-    def __init__(self, value: V):
+    def __init__(self, value: V) -> None:
         self.value = value
 
     @classmethod
     @abstractmethod
-    def from_stream(cls, stream: BytesIO) -> "ParameterBase[Any]":
+    def from_stream(cls, stream: BytesIO) -> Self:
         """Reads from the byte stream and constructs the parameter object."""
-        pass
 
     @abstractmethod
     def serialize(self) -> bytes:
         """Converts the internal value back into a byte payload."""
-        pass
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({repr(self.value)})"
+        return f"{self.__class__.__name__}({self.value!r})"
 
     def __hash__(self) -> int:
         return hash((type(self), self.value))
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, type(self)):
             return False
         return self.value == other.value
 
 
-T = TypeVar("T", bound=ParameterBase[Any])
-
-
-class ArrayParameterBase(ParameterBase[List[T]]):
+class ArrayParameterBase[T: ParameterBase[Any]](ParameterBase[list[T]]):
     """Base class for Photon Array/Slice parameters."""
 
-    def __init__(self, value: Optional[Sequence[T]] = None):
+    def __init__(self, value: Sequence[T] | None = None) -> None:
         # Default to an empty list if nothing is provided
         super().__init__(list(value) if value is not None else [])
 
     def __setitem__(self, key: int, value: T) -> None:
         if not isinstance(key, int):
-            raise TypeError(f"Key must be an index, got {type(key).__name__}")
+            msg = f"Key must be an index, got {type(key).__name__}"
+            raise TypeError(msg)
         if not isinstance(value, ParameterBase):
-            raise TypeError(
+            msg = (
                 f"Value must be derived from ParameterBase, got {type(value).__name__}"
             )
+            raise TypeError(msg)
         self.value[key] = value
 
     def __getitem__(self, key: int) -> T:
         if not isinstance(key, int):
-            raise TypeError(f"Key must be an index, got {type(key).__name__}")
+            msg = f"Key must be an index, got {type(key).__name__}"
+            raise TypeError(msg)
         return self.value[key]
 
     def __len__(self) -> int:
@@ -68,7 +69,8 @@ class ArrayParameterBase(ParameterBase[List[T]]):
 
     def append(self, value: T) -> None:
         if not isinstance(value, ParameterBase):
-            raise TypeError(
+            msg = (
                 f"Value must be derived from ParameterBase, got {type(value).__name__}"
             )
+            raise TypeError(msg)
         self.value.append(value)

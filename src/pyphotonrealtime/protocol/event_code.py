@@ -1,10 +1,16 @@
 from enum import IntEnum
-from typing import Any
+
+
+def _as_code(value: object) -> int:
+    if not isinstance(value, int):
+        msg = f"Event codes are ints, got {type(value).__name__}"
+        raise TypeError(msg)
+    return value
 
 
 class PrisonArchitectEventCode(IntEnum):
-    """
-    Reverse-engineered custom Photon event codes for Prison Architect.
+    """Reverse-engineered custom Photon event codes for Prison Architect.
+
     Photon custom events are strictly in the 1-199 range.
     """
 
@@ -27,12 +33,12 @@ class PrisonArchitectEventCode(IntEnum):
     Unknown118 = 118
 
     @classmethod
-    def _missing_(cls, value: Any):
-        """
-        Gracefully handles unknown event codes intercepted from the network
-        so your parser doesn't crash on undocumented events.
-        """
-        return int(value)
+    def _missing_(cls, value: object) -> int:
+        """Map unknown codes to plain ints so undocumented events don't crash."""
+        return _as_code(value)
+
+
+CUSTOM_EVENT_CODE_MAX = 200
 
 
 class EventCode(IntEnum):
@@ -47,12 +53,9 @@ class EventCode(IntEnum):
     Event = 0xFF
 
     @classmethod
-    def _missing_(cls, value: Any):
-        """
-        Gracefully handles unknown event codes intercepted from the network
-        so your parser doesn't crash on undocumented events.
-        """
-        value = int(value)
-        if value > 0 and value <= 200:
-            return PrisonArchitectEventCode(value)
-        return value
+    def _missing_(cls, value: object) -> int:
+        """Map unknown codes to plain ints so undocumented events don't crash."""
+        code = _as_code(value)
+        if 0 < code <= CUSTOM_EVENT_CODE_MAX:
+            return PrisonArchitectEventCode(code)
+        return code

@@ -14,14 +14,18 @@ all from Python.
 pip install -e ".[test,lint]"   # from a checkout; not on PyPI yet
 ```
 
-Requires Python 3.10+.
+Requires Python 3.12+. Fully type-annotated (`py.typed`), checked with `mypy --strict`.
 
 ## Intended usage
 
 ```python
 import time
 from pyphotonrealtime import AppSettings, RealtimeClient
-from pyphotonrealtime.realtime import ConnectionCallbacks, MatchmakingCallbacks, EnterRoomParams
+from pyphotonrealtime.realtime import (
+    ConnectionCallbacks,
+    MatchmakingCallbacks,
+    EnterRoomParams,
+)
 
 
 class Bot(ConnectionCallbacks, MatchmakingCallbacks):
@@ -37,10 +41,12 @@ class Bot(ConnectionCallbacks, MatchmakingCallbacks):
 
 client = RealtimeClient()
 client.add_callback_target(Bot(client))
-client.connect_using_settings(AppSettings(app_id_realtime="<your app id>", fixed_region="eu"))
+client.connect_using_settings(
+    AppSettings(app_id_realtime="<your app id>", fixed_region="eu")
+)
 
 while True:
-    client.service()        # nothing happens on the wire without this
+    client.service()  # nothing happens on the wire without this
     time.sleep(1 / 30)
 ```
 
@@ -57,7 +63,17 @@ while True:
 
 ```bash
 python -m ruff --version          # must match the pin in pyproject.toml
-python -m ruff check --select E9,F63,F7,F82 .
+python -m ruff check .            # select = ["ALL"], see ruff.toml
 python -m ruff format --check .
-python -m pytest -q
+python -m mypy                    # strict
+python -m pytest -q               # unit tests (e2e excluded)
+PHOTON_APP_ID=... python -m pytest -m e2e   # live Photon Cloud, opt-in
+```
+
+## Testing
+
+Unit tests check that the protocol layer agrees with itself (round trips, framing).
+That doesn't prove it agrees with Photon. The `e2e` tests in `tests/e2e/` do that
+against the real Photon Cloud. They need a Realtime app id in `PHOTON_APP_ID`, and
+CI runs them nightly and on manual dispatch, never on PRs.
 ```

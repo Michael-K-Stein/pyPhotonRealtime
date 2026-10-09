@@ -1,44 +1,47 @@
-from io import BytesIO
+from __future__ import annotations
+
 from struct import pack, unpack
-from typing import Any, Dict, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Self, cast
 
 from pyphotonrealtime.protocol.param.base import ParameterBase
-from pyphotonrealtime.protocol.param.dictionary_param_base import DictionaryParameterBase
-from pyphotonrealtime.protocol.param.int32_param import Int32Parameter
-from pyphotonrealtime.protocol.param.int8_param import Int8Parameter
-from pyphotonrealtime.protocol.param.read_param import get_type_for_instance, read_parameter
-from pyphotonrealtime.protocol.param.string_param import StringParameter
+from pyphotonrealtime.protocol.param.dictionary_param_base import (
+    DictionaryParameterBase,
+)
+from pyphotonrealtime.protocol.param.read_param import (
+    get_type_for_instance,
+    read_parameter,
+)
 
-K = TypeVar("K", bound=ParameterBase[Any])
-V = TypeVar("V", bound=ParameterBase[Any])
+if TYPE_CHECKING:
+    from io import BytesIO
 
 
-class HashtableParameter(DictionaryParameterBase[K, V]):
+class HashtableParameter[K: ParameterBase[Any], V: ParameterBase[Any]](
+    DictionaryParameterBase[K, V]
+):
     """Untyped dictionary ('h'). Every key/val has a type prefix."""
 
     @classmethod
-    def from_stream(cls, stream: BytesIO) -> "HashtableParameter[Any, Any]":
+    def from_stream(cls, stream: BytesIO) -> Self:
         length = unpack(">h", stream.read(2))[0]
 
         # Explicitly declare the dictionary with ParameterBase[Any]
-        result: Dict[ParameterBase[Any], ParameterBase[Any]] = {}
+        result: dict[ParameterBase[Any], ParameterBase[Any]] = {}
         for _ in range(length):
             key = read_parameter(stream)
             val = read_parameter(stream)
 
             # Runtime type validation to catch stream corruption
             if not isinstance(key, ParameterBase):
-                raise TypeError(
-                    f"Expected key to be ParameterBase, got {type(key).__name__}"
-                )
+                msg = f"Expected key to be ParameterBase, got {type(key).__name__}"
+                raise TypeError(msg)
             if not isinstance(val, ParameterBase):
-                raise TypeError(
-                    f"Expected value to be ParameterBase, got {type(val).__name__}"
-                )
+                msg = f"Expected value to be ParameterBase, got {type(val).__name__}"
+                raise TypeError(msg)
 
             result[key] = val
 
-        return cls(cast(Any, result))
+        return cls(cast("Any", result))
 
     def serialize(self) -> bytes:
         payload = bytearray(pack(">h", len(self.value)))
@@ -51,14 +54,3 @@ class HashtableParameter(DictionaryParameterBase[K, V]):
             payload.extend(val.serialize())
 
         return bytes(payload)
-
-
-def foo():
-    my_hashtable = HashtableParameter(
-        {
-            Int8Parameter(4): StringParameter("Bar"),
-            Int32Parameter(4): StringParameter("Conflict"),
-        }
-    )
-    assert StringParameter("Bar") == my_hashtable[Int8Parameter(4)]
-    assert StringParameter("Conflict") == my_hashtable[Int32Parameter(4)]

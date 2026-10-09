@@ -1,13 +1,18 @@
-from io import BytesIO
-from typing import List, Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Self
 
 from pyphotonrealtime.protocol.enum_lookups import get_parameter_key_name
 from pyphotonrealtime.protocol.packet.base import PhotonDataPacket
-from pyphotonrealtime.protocol.packet.header import PhotonDataPacketHeader
 from pyphotonrealtime.protocol.packet.operation_payload import (
     PhotonPacketEncryptedPayload,
     PhotonPacketPayload,
 )
+
+if TYPE_CHECKING:
+    from io import BytesIO
+
+    from pyphotonrealtime.protocol.packet.header import PhotonDataPacketHeader
 
 
 class PhotonOperationPacket(PhotonDataPacket):
@@ -15,7 +20,7 @@ class PhotonOperationPacket(PhotonDataPacket):
         self,
         header: PhotonDataPacketHeader,
         payload: PhotonPacketPayload,
-        aes_key: Optional[bytes] = None,
+        aes_key: bytes | None = None,
     ) -> None:
         # Initialize the parent PhotonDataPacket with the already-parsed data
         super().__init__(header)
@@ -27,22 +32,26 @@ class PhotonOperationPacket(PhotonDataPacket):
         cls,
         data: BytesIO,
         *,
-        header: Optional[PhotonDataPacketHeader] = None,
-        aes_key: Optional[bytes] = None,
-    ) -> "PhotonOperationPacket":
+        header: PhotonDataPacketHeader | None = None,
+        aes_key: bytes | None = None,
+    ) -> Self:
         if header is None:
-            raise ValueError("Header is required for PhotonOperationPacket.from_bytes")
+            msg = "Header is required for PhotonOperationPacket.from_bytes"
+            raise ValueError(msg)
         if header.packet_length is None:
-            raise ValueError('Header must contain "packet_length" field')
+            msg = 'Header must contain "packet_length" field'
+            raise ValueError(msg)
 
         payload_length = header.packet_length - header.data_offset()
         payload_data = data.read(payload_length)
         if len(payload_data) != payload_length:
-            raise ValueError("Payload length does not match header")
+            msg = "Payload length does not match header"
+            raise ValueError(msg)
 
         if header.is_encrypted():
             if aes_key is None:
-                raise ValueError("Payload is encrypted but no AES key was given!")
+                msg = "Payload is encrypted but no AES key was given!"
+                raise ValueError(msg)
 
             payload = PhotonPacketEncryptedPayload.from_bytes(
                 header=header, data=payload_data
@@ -52,14 +61,15 @@ class PhotonOperationPacket(PhotonDataPacket):
 
         return cls(header=header, payload=payload, aes_key=aes_key)
 
-    def get_payload(self):
+    def get_payload(self) -> PhotonPacketPayload:
         return self._operation_payload
 
     def serialize(self) -> bytes:
         serialized_payload = b""
         if self.get_header().is_encrypted():
             if self._aes_key is None:
-                raise ValueError("No AES key provided!")
+                msg = "No AES key provided!"
+                raise ValueError(msg)
             serialized_payload = PhotonPacketEncryptedPayload.encrypt(
                 self._operation_payload,
                 self._aes_key,
@@ -73,7 +83,7 @@ class PhotonOperationPacket(PhotonDataPacket):
     def set_aes_key(self, key: bytes) -> None:
         self._aes_key = key
 
-    def log(self) -> List[str]:
+    def log(self) -> list[str]:
         debug_data = (
             [
                 f"Return Code: {self.get_payload().get_return_code()}",
@@ -85,8 +95,8 @@ class PhotonOperationPacket(PhotonDataPacket):
 
         encrypted = "No"
         if self.get_header().is_encrypted():
-            assert self._aes_key is not None
-            encrypted = f"Yes [{self._aes_key.hex()[:16]}]"
+            key = self._aes_key.hex()[:16] if self._aes_key is not None else "no key"
+            encrypted = f"Yes [{key}]"
 
         return [
             f"Command: {self.get_header().get_command_name()}",

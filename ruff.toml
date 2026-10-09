@@ -13,9 +13,17 @@ ignore = [
     # Mutually exclusive docstring styles; we use D211 + D212.
     "D203",
     "D213",
+    # No per-file copyright headers.
+    "CPY001",
 ]
 
+# Lets TC00x move typing-only imports under TYPE_CHECKING by adding
+# `from __future__ import annotations` (3.12/3.13 evaluate annotations eagerly).
+future-annotations = true
+
 [lint.per-file-ignores]
+# Inherited from prison-architect-server and not yet documented; see ROADMAP.md.
+"src/pyphotonrealtime/protocol/**" = ["D100", "D101", "D102", "D103", "D104", "D105", "D107"]
 "tests/**" = [
     "S101",    # assert is how pytest works
     "D",       # test names are the documentation

@@ -1,4 +1,6 @@
-from typing import TYPE_CHECKING, Any, Optional, Tuple
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
@@ -18,54 +20,52 @@ if TYPE_CHECKING:
 
 def _decrypt_data(encrypted_data: bytes, aes_key: bytes) -> bytes:
     iv = bytes(16)
-    cipher = AES.new(aes_key, AES.MODE_CBC, iv)  # type: ignore
+    cipher = AES.new(aes_key, AES.MODE_CBC, iv)
     padded_plaintext = cipher.decrypt(encrypted_data)
-    plaintext = unpad(padded_plaintext, AES.block_size)
-    return plaintext
+    return unpad(padded_plaintext, AES.block_size)
 
 
 def _encrypt_data(plaintext: bytes, aes_key: bytes) -> bytes:
     iv = bytes(16)
-    cipher = AES.new(aes_key, AES.MODE_CBC, iv)  # type: ignore
+    cipher = AES.new(aes_key, AES.MODE_CBC, iv)
     padded_plaintext = pad(plaintext, AES.block_size)
-    ciphertext = cipher.encrypt(padded_plaintext)
-    return ciphertext
+    return cipher.encrypt(padded_plaintext)
 
 
 class PhotonPacketPayload:
-    params: "CommandParams"
-    operation_code: "OperationCode"
-    response_debug_data: Tuple[int, "ParameterBase[Any]"] | None
-    header: "PhotonDataPacketHeader"
+    params: CommandParams
+    operation_code: OperationCode
+    response_debug_data: tuple[int, ParameterBase[Any]] | None
+    header: PhotonDataPacketHeader
 
     def __init__(
         self,
-        operation_code: "OperationCode",
-        params: "CommandParams",
-        header: "PhotonDataPacketHeader",
-        response_debug_data: Optional[Tuple[int, "ParameterBase[Any]"]] = None,
-    ):
+        operation_code: OperationCode,
+        params: CommandParams,
+        header: PhotonDataPacketHeader,
+        response_debug_data: tuple[int, ParameterBase[Any]] | None = None,
+    ) -> None:
         self.operation_code = operation_code
         self.params = params
         self.response_debug_data = response_debug_data
         self.header = header
+        self._cached_serialized: bytes | None = None
 
     @staticmethod
-    def from_bytes(header: "PhotonDataPacketHeader", data: bytes):
+    def from_bytes(header: PhotonDataPacketHeader, data: bytes) -> PhotonPacketPayload:
         operation_code, params, response_debug_data = deserialize_photon_payload(
             header,
             data,
         )
-        payload = PhotonPacketPayload(
+        return PhotonPacketPayload(
             operation_code=operation_code,
             params=params,
             response_debug_data=response_debug_data,
             header=header,
         )
-        return payload
 
     def serialize(self) -> bytes:
-        if hasattr(self, "_cached_serialized"):
+        if self._cached_serialized is not None:
             return self._cached_serialized
 
         serialized_data = serialize_photon_payload(
@@ -93,29 +93,32 @@ class PhotonPacketPayload:
         ):
             return None
         if not isinstance(self.response_debug_data[1], StringParameter):
-            raise TypeError("Debug message is not a string!")
+            msg = "Debug message is not a string!"
+            raise TypeError(msg)
         return self.response_debug_data[1].value
 
 
 class PhotonPacketEncryptedPayload:
     raw: bytes
     is_response: bool
-    header: "PhotonDataPacketHeader"
+    header: PhotonDataPacketHeader
 
     @staticmethod
-    def from_bytes(header: "PhotonDataPacketHeader", data: bytes):
+    def from_bytes(
+        header: PhotonDataPacketHeader, data: bytes
+    ) -> PhotonPacketEncryptedPayload:
         packet = PhotonPacketEncryptedPayload()
         packet.raw = data
         packet.header = header
         return packet
 
-    def decrypt(self, aes_key: bytes) -> "PhotonPacketPayload":
+    def decrypt(self, aes_key: bytes) -> PhotonPacketPayload:
         plaintext = _decrypt_data(self.raw, aes_key)
         return PhotonPacketPayload.from_bytes(header=self.header, data=plaintext)
 
     @staticmethod
     def encrypt(
-        payload: "PhotonPacketPayload",
+        payload: PhotonPacketPayload,
         aes_key: bytes,
     ) -> bytes:
         return _encrypt_data(

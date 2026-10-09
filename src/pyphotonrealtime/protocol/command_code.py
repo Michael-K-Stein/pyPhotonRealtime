@@ -25,5 +25,8 @@ class CommandCode(IntEnum):
     Unknown = 0xFF
 
 
+ENCRYPTED_FLAG = 0x80
+
+
 def is_encrypted(command_code: CommandCode) -> bool:
-    return command_code.value > 0x80
+    return command_code.value > ENCRYPTED_FLAG

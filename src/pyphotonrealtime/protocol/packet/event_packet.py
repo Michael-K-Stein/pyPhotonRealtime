@@ -1,11 +1,15 @@
-from typing import Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from pyphotonrealtime.protocol.command_code import CommandCode
-from pyphotonrealtime.protocol.packet.header import PhotonDataPacketHeader
 from pyphotonrealtime.protocol.packet.operation_packet import PhotonOperationPacket
-from pyphotonrealtime.protocol.packet.operation_payload import (
-    PhotonPacketPayload,
-)
+
+if TYPE_CHECKING:
+    from pyphotonrealtime.protocol.packet.header import PhotonDataPacketHeader
+    from pyphotonrealtime.protocol.packet.operation_payload import (
+        PhotonPacketPayload,
+    )
 
 
 class PhotonEventPacket(PhotonOperationPacket):
@@ -13,13 +17,14 @@ class PhotonEventPacket(PhotonOperationPacket):
         self,
         header: PhotonDataPacketHeader,
         payload: PhotonPacketPayload,
-        aes_key: Optional[bytes] = None,
+        aes_key: bytes | None = None,
     ) -> None:
         super().__init__(header=header, payload=payload, aes_key=aes_key)
         if header.get_command_code() not in (
             CommandCode.Event,
             CommandCode.EncryptedEvent,
         ):
-            raise TypeError("Packet is not an Event!")
+            msg = "Packet is not an Event!"
+            raise TypeError(msg)
         self._operation_payload = payload
         self._aes_key = aes_key

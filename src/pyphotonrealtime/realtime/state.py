@@ -1,7 +1,11 @@
+"""Client workflow states and disconnect causes."""
+
 from enum import Enum, auto
 
 
 class ServerType(Enum):
+    """Which Photon server the client is currently talking to."""
+
     NameServer = auto()
     MasterServer = auto()
     GameServer = auto()
@@ -32,6 +36,8 @@ class ClientState(Enum):
 
 
 class DisconnectCause(Enum):
+    """Why the client got disconnected."""
+
     NoCause = auto()
     ExceptionOnConnect = auto()
     Exception = auto()

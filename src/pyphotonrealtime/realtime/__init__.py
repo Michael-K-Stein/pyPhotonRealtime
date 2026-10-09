@@ -1,4 +1,7 @@
+"""High-level client: connection workflow, matchmaking, rooms and callbacks."""
+
 from pyphotonrealtime.realtime.callbacks import (
+    CallbackTarget,
     ConnectionCallbacks,
     InRoomCallbacks,
     LobbyCallbacks,
@@ -21,6 +24,7 @@ from pyphotonrealtime.realtime.state import ClientState, DisconnectCause, Server
 
 __all__ = [
     "AppSettings",
+    "CallbackTarget",
     "ClientState",
     "ConnectionCallbacks",
     "DisconnectCause",

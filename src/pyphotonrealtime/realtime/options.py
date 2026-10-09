@@ -1,15 +1,21 @@
+"""Option bundles for matchmaking and events."""
+
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class ReceiverGroup(IntEnum):
+    """Who receives a raised event."""
+
     Others = 0
     All = 1
     MasterClient = 2
 
 
 class EventCaching(IntEnum):
+    """How the server caches a raised event for late joiners."""
+
     DoNotCache = 0
     AddToRoomCache = 4
     AddToRoomCacheGlobal = 5
@@ -17,40 +23,48 @@ class EventCaching(IntEnum):
     RemoveFromRoomCacheForActorsLeft = 7
 
 
-@dataclass
+@dataclass(slots=True, kw_only=True)
 class RoomOptions:
+    """Settings for a room created by this client."""
+
     is_visible: bool = True
     is_open: bool = True
     max_players: int = 0
     player_ttl: int = 0
     empty_room_ttl: int = 0
-    custom_room_properties: Dict[Any, Any] = field(default_factory=dict)
-    custom_room_properties_for_lobby: List[str] = field(default_factory=list)
+    custom_room_properties: dict[Any, Any] = field(default_factory=dict)
+    custom_room_properties_for_lobby: list[str] = field(default_factory=list)
     publish_user_id: bool = False
     suppress_room_events: bool = False
-    plugins: Optional[List[str]] = None
+    plugins: list[str] | None = None
 
 
-@dataclass
+@dataclass(slots=True, kw_only=True)
 class EnterRoomParams:
-    room_name: Optional[str] = None
-    room_options: Optional[RoomOptions] = None
-    lobby: Optional[str] = None
-    player_properties: Dict[Any, Any] = field(default_factory=dict)
-    expected_users: Optional[List[str]] = None
+    """Arguments for creating, joining or rejoining a room."""
+
+    room_name: str | None = None
+    room_options: RoomOptions | None = None
+    lobby: str | None = None
+    player_properties: dict[Any, Any] = field(default_factory=dict)
+    expected_users: list[str] | None = None
     rejoin: bool = False
 
 
-@dataclass
+@dataclass(slots=True, kw_only=True)
 class RaiseEventArgs:
+    """Routing and caching for ``op_raise_event``."""
+
     receivers: ReceiverGroup = ReceiverGroup.Others
-    target_actors: Optional[List[int]] = None
+    target_actors: list[int] | None = None
     interest_group: int = 0
     caching: EventCaching = EventCaching.DoNotCache
 
 
-@dataclass
+@dataclass(slots=True, kw_only=True)
 class SendOptions:
+    """Delivery options for an operation."""
+
     reliable: bool = True
     encrypt: bool = False
     channel: int = 0

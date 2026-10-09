@@ -4,3 +4,4 @@ venv/
 venv2/
 .env
 .venv/
+.venv*/

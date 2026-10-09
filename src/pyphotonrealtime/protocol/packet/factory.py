@@ -1,17 +1,21 @@
-from typing import Literal, Optional, cast
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Literal, cast
 
 from pyphotonrealtime.protocol.command_code import CommandCode
-from pyphotonrealtime.protocol.enum_lookups import CommandParams
-from pyphotonrealtime.protocol.event_code import EventCode
-from pyphotonrealtime.protocol.operation_code import OperationCode
 from pyphotonrealtime.protocol.packet.base import PhotonDataPacket
-from pyphotonrealtime.protocol.packet.event_packet import PhotonEventPacket
 from pyphotonrealtime.protocol.packet.header import PhotonDataPacketHeader
 from pyphotonrealtime.protocol.packet.operation_packet import PhotonOperationPacket
 from pyphotonrealtime.protocol.packet.operation_payload import PhotonPacketPayload
 from pyphotonrealtime.protocol.param.nil_param import NilParameter
-from pyphotonrealtime.protocol.param.parameter_key import ParameterKey
 from pyphotonrealtime.protocol.param.string_param import StringParameter
+
+if TYPE_CHECKING:
+    from pyphotonrealtime.protocol.enum_lookups import CommandParams
+    from pyphotonrealtime.protocol.event_code import EventCode
+    from pyphotonrealtime.protocol.operation_code import OperationCode
+    from pyphotonrealtime.protocol.packet.event_packet import PhotonEventPacket
+
 
 class PacketFactory:
     @staticmethod
@@ -22,17 +26,19 @@ class PacketFactory:
     @staticmethod
     def operation(
         command: (
-            Literal[CommandCode.Event]
-            | Literal[CommandCode.EncryptedEvent]
-            | Literal[CommandCode.Operation]
-            | Literal[CommandCode.OperationResponse]
-            | Literal[CommandCode.EncryptedOperation]
-            | Literal[CommandCode.EncryptedOperationResponse]
+            Literal[
+                CommandCode.Event,
+                CommandCode.EncryptedEvent,
+                CommandCode.Operation,
+                CommandCode.OperationResponse,
+                CommandCode.EncryptedOperation,
+                CommandCode.EncryptedOperationResponse,
+            ]
         ),
         operation: OperationCode,
-        params: Optional[CommandParams] = None,
-        return_code: Optional[int] = None,
-        error_message: Optional[str] = None,
+        params: CommandParams | None = None,
+        return_code: int | None = None,
+        error_message: str | None = None,
     ) -> PhotonOperationPacket:
         if params is None:
             params = {}
@@ -60,16 +66,17 @@ class PacketFactory:
     @staticmethod
     def event(
         event: EventCode,
-        params: Optional[CommandParams] = None,
-        return_code: Optional[int] = None,
-        error_message: Optional[str] = None,
+        params: CommandParams | None = None,
+        return_code: int | None = None,
+        error_message: str | None = None,
+        *,
         encrypted: bool = False,
     ) -> PhotonEventPacket:
         return cast(
-            PhotonEventPacket,
+            "PhotonEventPacket",
             PacketFactory.operation(
                 CommandCode.EncryptedEvent if encrypted else CommandCode.Event,
-                operation=cast(OperationCode, event),
+                operation=cast("OperationCode", event),
                 params=params,
                 return_code=return_code,
                 error_message=error_message,
@@ -79,9 +86,9 @@ class PacketFactory:
     @staticmethod
     def encrypted_event(
         event: EventCode,
-        params: Optional[CommandParams] = None,
-        return_code: Optional[int] = None,
-        error_message: Optional[str] = None,
+        params: CommandParams | None = None,
+        return_code: int | None = None,
+        error_message: str | None = None,
     ) -> PhotonEventPacket:
         return PacketFactory.event(
             event=event,

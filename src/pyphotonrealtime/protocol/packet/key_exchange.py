@@ -1,5 +1,6 @@
-from io import BytesIO
-from typing import TYPE_CHECKING, Optional, cast
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Self
 
 from pyphotonrealtime.protocol.command_code import CommandCode
 from pyphotonrealtime.protocol.operation_code import OperationCode
@@ -10,60 +11,53 @@ from pyphotonrealtime.protocol.param.int8_slice_param import Int8SliceParameter
 from pyphotonrealtime.protocol.param.parameter_key import ParameterKey
 
 if TYPE_CHECKING:
-    from pyphotonrealtime.protocol.packet.header import PhotonDataPacketHeader
+    from io import BytesIO
 
 
-def _extract_public_key(packet: PhotonOperationPacket) -> bytes:
-    pub_key = packet.get_payload().params.get(ParameterKey.ClientKey, None)
-    if pub_key is None:
-        raise ValueError("No public key found!")
+def _extract_public_key(payload: PhotonPacketPayload) -> bytes:
+    pub_key = payload.params.get(ParameterKey.ClientKey)
+    if not isinstance(pub_key, Int8SliceParameter):
+        msg = "No public key found!"
+        raise TypeError(msg)
     return pub_key.value
 
 
 class KeyExchangePacket(PhotonOperationPacket):
-    _public_key_bytes: bytes
+    _public_key: bytes
 
     def __init__(
         self,
         *,
-        header: "PhotonDataPacketHeader",
-        public_key: Optional[Int8SliceParameter | bytes] = None,
-        payload: Optional[PhotonPacketPayload] = None,
-        aes_key: Optional[bytes] = None,
-    ):
-        if payload is None and public_key is None:
-            raise ValueError("Payload and public key cannot both be None!")
-
-        client_key: Optional[Int8SliceParameter] = None
-        if type(public_key) is bytes:
-            client_key = Int8SliceParameter(public_key)
-        elif type(public_key) is Int8SliceParameter:
-            client_key = public_key
-
-        assert client_key is not None or payload is not None
-
-        if payload is not None and public_key is not None:
-            assert client_key is not None
-            payload.params[ParameterKey.ClientKey] = client_key
+        header: PhotonDataPacketHeader,
+        public_key: Int8SliceParameter | bytes | None = None,
+        payload: PhotonPacketPayload | None = None,
+        aes_key: bytes | None = None,  # noqa: ARG002 - key exchange is never encrypted
+    ) -> None:
+        client_key = (
+            Int8SliceParameter(public_key)
+            if isinstance(public_key, bytes)
+            else public_key
+        )
 
         if payload is None:
-            assert client_key is not None
+            if client_key is None:
+                msg = "Payload and public key cannot both be None!"
+                raise ValueError(msg)
             payload = PhotonPacketPayload(
                 operation_code=(
                     OperationCode.DiffieHellmanRequest
                     if header.command == CommandCode.KeyExchangeRequest
                     else OperationCode.DiffieHellmanResponse
                 ),
-                params={
-                    ParameterKey.ClientKey: client_key,
-                },
+                params={ParameterKey.ClientKey: client_key},
                 header=header,
             )
+        elif client_key is not None:
+            payload.params[ParameterKey.ClientKey] = client_key
+
         super().__init__(header=header, payload=payload)
         self._public_key = (
-            cast(bytes, client_key.value)
-            if client_key is not None
-            else _extract_public_key(super())
+            client_key.value if client_key is not None else _extract_public_key(payload)
         )
 
     @classmethod
@@ -71,17 +65,14 @@ class KeyExchangePacket(PhotonOperationPacket):
         cls,
         data: BytesIO,
         *,
-        header: Optional["PhotonDataPacketHeader"] = None,
-        aes_key: Optional[bytes] = None,
-    ):
-        # Key exchange implicitly implies that the packet is both unencrypted, and that whatever AES key was passed here is now irrelevant
-        packet = super().from_bytes(
-            data,
-            header=header,
-            aes_key=None,
+        header: PhotonDataPacketHeader | None = None,
+        aes_key: bytes | None = None,  # noqa: ARG003 - key exchange is never encrypted
+    ) -> Self:
+        packet = PhotonOperationPacket.from_bytes(data, header=header, aes_key=None)
+        return cls(
+            header=packet.get_header(),
+            public_key=_extract_public_key(packet.get_payload()),
         )
-
-        return cls(header=packet.get_header(), public_key=_extract_public_key(packet))
 
     def get_public_key(self) -> bytes:
         return self._public_key
@@ -94,11 +85,11 @@ class InitEncryptionRequest(KeyExchangePacket):
     def __init__(
         self,
         *,
-        public_key: Optional[Int8SliceParameter | bytes] = None,
-        header: Optional["PhotonDataPacketHeader"] = None,
-        payload: Optional[PhotonPacketPayload] = None,
-        aes_key: Optional[bytes] = None,
-    ):
+        public_key: Int8SliceParameter | bytes | None = None,
+        header: PhotonDataPacketHeader | None = None,
+        payload: PhotonPacketPayload | None = None,
+        aes_key: bytes | None = None,
+    ) -> None:
         super().__init__(
             header=(
                 header
@@ -107,23 +98,7 @@ class InitEncryptionRequest(KeyExchangePacket):
             ),
             public_key=public_key,
             payload=payload,
-        )
-
-    @classmethod
-    def from_bytes(
-        cls,
-        data: BytesIO,
-        *,
-        header: Optional["PhotonDataPacketHeader"] = None,
-        aes_key: Optional[bytes] = None,
-    ):
-        return cast(
-            InitEncryptionRequest,
-            super().from_bytes(
-                data,
-                header=header,
-                aes_key=None,
-            ),
+            aes_key=aes_key,
         )
 
 
@@ -131,11 +106,11 @@ class InitEncryptionResponse(KeyExchangePacket):
     def __init__(
         self,
         *,
-        public_key: Optional[Int8SliceParameter | bytes] = None,
-        header: Optional["PhotonDataPacketHeader"] = None,
-        payload: Optional[PhotonPacketPayload] = None,
-        aes_key: Optional[bytes] = None,
-    ):
+        public_key: Int8SliceParameter | bytes | None = None,
+        header: PhotonDataPacketHeader | None = None,
+        payload: PhotonPacketPayload | None = None,
+        aes_key: bytes | None = None,
+    ) -> None:
         super().__init__(
             header=(
                 header
@@ -146,22 +121,5 @@ class InitEncryptionResponse(KeyExchangePacket):
             ),
             public_key=public_key,
             payload=payload,
-        )
-
-    @classmethod
-    def from_bytes(
-        cls,
-        data: BytesIO,
-        *,
-        header: Optional["PhotonDataPacketHeader"] = None,
-        aes_key: Optional[bytes] = None,
-    ):
-        # Key exchange implicitly implies that the packet is both unencrypted, and that whatever AES key was passed here is now irrelevant
-        return cast(
-            InitEncryptionResponse,
-            super().from_bytes(
-                data,
-                header=header,
-                aes_key=None,
-            ),
+            aes_key=aes_key,
         )

@@ -1,25 +1,30 @@
+from __future__ import annotations
+
 import hashlib
 import os
-from typing import Optional
+from typing import TYPE_CHECKING
 
 from pyphotonrealtime.protocol.consts import DH_GENERATOR, OAKLEY_PRIME_768
 from pyphotonrealtime.protocol.packet.key_exchange import (
     InitEncryptionRequest,
-    InitEncryptionResponse,
 )
 
+if TYPE_CHECKING:
+    from pyphotonrealtime.protocol.packet.key_exchange import (
+        InitEncryptionResponse,
+    )
 
-def compute_public_key(priv_key: bytes | int):
+
+def compute_public_key(priv_key: bytes | int) -> int:
     priv_key = (
         priv_key
         if isinstance(priv_key, int)
         else int.from_bytes(priv_key, byteorder="big")
     )
-    pub_key = pow(DH_GENERATOR, priv_key, OAKLEY_PRIME_768)
-    return pub_key
+    return pow(DH_GENERATOR, priv_key, OAKLEY_PRIME_768)
 
 
-def compute_shared_aes_key(pub_key: int | bytes, priv_key: int | bytes):
+def compute_shared_aes_key(pub_key: int | bytes, priv_key: int | bytes) -> bytes:
     pub_key_int = (
         pub_key
         if isinstance(pub_key, int)
@@ -33,11 +38,10 @@ def compute_shared_aes_key(pub_key: int | bytes, priv_key: int | bytes):
     shared_secret_int = pow(pub_key_int, priv_key_int, OAKLEY_PRIME_768)
     shared_len = (shared_secret_int.bit_length() + 7) // 8
     shared_secret_bytes = shared_secret_int.to_bytes(shared_len, byteorder="big")
-    aes_key = hashlib.sha256(shared_secret_bytes).digest()
-    return aes_key
+    return hashlib.sha256(shared_secret_bytes).digest()
 
 
-def generate_dh_keys(client_pub_key: bytes):
+def generate_dh_keys(client_pub_key: bytes) -> tuple[bytes, bytes]:
     client_pub_key_int = int.from_bytes(client_pub_key, byteorder="big")
     server_priv_bytes = os.urandom(20)
     server_priv_int = int.from_bytes(server_priv_bytes, byteorder="big")
@@ -46,7 +50,9 @@ def generate_dh_keys(client_pub_key: bytes):
     return server_pub_int.to_bytes((server_pub_int.bit_length() + 7) // 8), aes_key
 
 
-def build_dh_request(priv_key_int: Optional[int] = None):
+def build_dh_request(
+    priv_key_int: int | None = None,
+) -> tuple[int, InitEncryptionRequest]:
     if priv_key_int is None:
         priv_key = os.urandom(20)
         priv_key_int = int.from_bytes(priv_key, byteorder="big")
@@ -56,7 +62,6 @@ def build_dh_request(priv_key_int: Optional[int] = None):
     )
 
 
-def process_dh_response(priv_int: int, response: InitEncryptionResponse):
+def process_dh_response(priv_int: int, response: InitEncryptionResponse) -> bytes:
     real_server_pub = response.get_public_key()
-    aes_key = compute_shared_aes_key(real_server_pub, priv_int)
-    return aes_key
+    return compute_shared_aes_key(real_server_pub, priv_int)

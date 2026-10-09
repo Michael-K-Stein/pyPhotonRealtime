@@ -1,8 +1,12 @@
-from io import BytesIO
+from __future__ import annotations
+
 from struct import pack, unpack
-from typing import Any, Union
+from typing import TYPE_CHECKING, Self
 
 from pyphotonrealtime.protocol.param.base import ParameterBase
+
+if TYPE_CHECKING:
+    from io import BytesIO
 
 
 class IntParameterBase(ParameterBase[int]):
@@ -15,10 +19,10 @@ class IntParameterBase(ParameterBase[int]):
         """Allows the parameter to be used safely directly as a list/array index."""
         return self.value
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, ParameterBase):
             # If comparing to another Photon parameter, the types MUST match exactly
-            return type(self) is type(other) and self.value == other.value  # type: ignore
+            return type(self) is type(other) and self.value == other.value
 
         if isinstance(other, int):
             # If comparing to a raw Python integer, just compare the value
@@ -26,22 +30,22 @@ class IntParameterBase(ParameterBase[int]):
 
         return False
 
-    def __add__(self, other: Union["IntParameterBase", int]) -> int:
+    def __add__(self, other: IntParameterBase | int) -> int:
         return self.value + int(other)
 
-    def __sub__(self, other: Union["IntParameterBase", int]) -> int:
+    def __sub__(self, other: IntParameterBase | int) -> int:
         return self.value - int(other)
 
-    def __lt__(self, other: Union["IntParameterBase", int]) -> bool:
+    def __lt__(self, other: IntParameterBase | int) -> bool:
         return self.value < int(other)
 
-    def __gt__(self, other: Union["IntParameterBase", int]) -> bool:
+    def __gt__(self, other: IntParameterBase | int) -> bool:
         return self.value > int(other)
 
-    def __le__(self, other: Union["IntParameterBase", int]) -> bool:
+    def __le__(self, other: IntParameterBase | int) -> bool:
         return self.value <= int(other)
 
-    def __ge__(self, other: Union["IntParameterBase", int]) -> bool:
+    def __ge__(self, other: IntParameterBase | int) -> bool:
         return self.value >= int(other)
 
     def __hash__(self) -> int:
@@ -51,7 +55,7 @@ class IntParameterBase(ParameterBase[int]):
 
 class Int8Parameter(IntParameterBase):
     @classmethod
-    def from_stream(cls, stream: BytesIO):
+    def from_stream(cls, stream: BytesIO) -> Self:
         return cls(unpack(">B", stream.read(1))[0])
 
     def serialize(self) -> bytes:

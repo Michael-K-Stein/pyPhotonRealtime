@@ -8,7 +8,6 @@ version = "0.1.0.dev0"
 description = "Pure-Python client for games running on Photon Realtime"
 readme = "README.md"
 requires-python = ">=3.12"
-license = "MIT"
 authors = [{ name = "Michael K. Steinberg" }]
 dependencies = [
     "pycryptodome>=3.20", # AES for encrypted operations / DH key exchange
@@ -23,6 +22,8 @@ packages = ["src/pyphotonrealtime"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = ["-m", "not e2e", "--strict-markers"]
+markers = ["e2e: talks to the real Photon Cloud (needs PHOTON_APP_ID)"]
 
 [tool.mypy]
 python_version = "3.12"

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from enum import IntEnum
 
 
@@ -24,13 +26,15 @@ class ParameterType(IntEnum):
     ObjectSliceType = 122
 
     @classmethod
-    def _missing_(cls, value: object):
+    def _missing_(cls, value: object) -> ParameterType:
         if not isinstance(value, int):
-            raise TypeError("Value must be an int")
+            msg = "Value must be an int"
+            raise TypeError(msg)
 
-        if value == 0:
-            return cls.NilType
-        if value == 7:
-            return cls.Int16Type
+        # Protocol 1.6 legacy codes that alias newer ones.
+        legacy = {0: cls.NilType, 7: cls.Int16Type}
+        if value in legacy:
+            return legacy[value]
 
-        raise ValueError(f"Not a valid id: {value}")
+        msg = f"Not a valid id: {value}"
+        raise ValueError(msg)

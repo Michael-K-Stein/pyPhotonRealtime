@@ -28,7 +28,8 @@ separate layer and doesn't change the core.
 - [x] Extract `server/photon` (history preserved) into `pyphotonrealtime.protocol`
 - [x] Decouple from server-only code (`GamesManager`, logging, settings, queue)
 - [x] Skeletons: `Transport`, `PhotonPeer`, `RealtimeClient`, callbacks, options, Room/Player
-- [x] Packaging (`pyproject.toml`, src layout, `py.typed`), CI (ruff pin and pytest matrix)
+- [x] Packaging (`pyproject.toml`, src layout, `py.typed`), Python 3.12+
+- [x] CI: ruff `ALL` (pinned), `mypy --strict`, pytest on 3.12-3.14, nightly e2e job
 
 ### M1: PhotonPeer over TCP
 - [ ] `connect`: send `InitRequest`, handle `InitResponse`, status callbacks
@@ -37,12 +38,15 @@ separate layer and doesn't change the core.
 - [ ] `establish_encryption` (DH via `photon_enc`), encrypted ops (AES-CBC)
 - [ ] Traffic stats and round-trip time
 - [ ] Tests against a fake in-process server (reuse PA server's server-side code as a fixture)
+- [ ] First e2e test passing: TCP connect + Init to `ns.photonengine.io`
+- [ ] Buffer partial TCP writes (`TcpTransport.send` currently blocks)
 
 ### M2: RealtimeClient connection workflow
 - [ ] Name Server: `OpGetRegions`, `OpAuthenticate` / `AuthOnce`, region pinging
 - [ ] Master Server hop with token; direct-master mode (`use_name_server=False`)
 - [ ] Disconnect causes, `reconnect_and_rejoin`
 - [ ] Custom authentication (`AuthenticationValues`)
+- [ ] e2e: Name Server -> Master Server against Photon Cloud (`tests/e2e`, currently xfail)
 
 ### M3: Matchmaking and lobbies
 - [ ] Join/leave lobby, room list and `GameListUpdate` events, lobby stats
@@ -54,6 +58,7 @@ separate layer and doesn't change the core.
 - [ ] `op_raise_event` (receivers, target actors, caching, interest groups)
 - [ ] Set room/actor properties, with expected-properties CAS
 - [ ] Master client switching; `op_custom` escape hatch
+- [ ] e2e: two clients in one room exchange events and properties
 
 ### M5: Protocol completeness
 - [ ] Protocol 1.8 (`SerializationProtocol.V18`), the default in v5+ SDKs; audit what's implemented today
@@ -74,8 +79,9 @@ separate layer and doesn't change the core.
   to the PA repo before 1.0.
 - `OperationCode` mixes client ops with internal aliases (`Authenticate`/`GameList` share 230);
   split into `OperationCode` / `EventCode` / `ParameterCode` the way the SDK does.
-- Lint runs correctness rules only (`E9,F63,F7,F82`); widen it once the inherited code is cleaned up.
-- Add type checking (pyright/mypy) to CI.
+- `protocol/` is exempt from the missing-docstring rules (D100-D107) in `ruff.toml`. Document it
+  and drop the exemption. Every other rule, and `mypy --strict`, already applies to it.
+- `PacketFactory.event` casts a `PhotonOperationPacket` to `PhotonEventPacket`. Construct the real type.
 
 ## Decision: dataclasses vs. pydantic v2
 

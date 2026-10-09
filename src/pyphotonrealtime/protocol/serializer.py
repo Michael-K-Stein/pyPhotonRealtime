@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import struct
 from io import BytesIO
-from typing import TYPE_CHECKING, Any, Dict, Tuple
+from typing import TYPE_CHECKING, Any
 
 from pyphotonrealtime.protocol.command_code import CommandCode
 from pyphotonrealtime.protocol.operation_code import OperationCode
@@ -13,14 +15,12 @@ if TYPE_CHECKING:
 
 
 def serialize_photon_payload(
-    operation_code: "OperationCode",
-    params: Dict["ParameterKey", "ParameterBase[Any]"],
-    response_debug_data: Tuple[int, "ParameterBase[Any]"] | None,
-    header: "PhotonDataPacketHeader",
+    operation_code: OperationCode,
+    params: dict[ParameterKey, ParameterBase[Any]],
+    response_debug_data: tuple[int, ParameterBase[Any]] | None,
+    header: PhotonDataPacketHeader,
 ) -> bytes:
-    """
-    Serializes an Operation Code and a dictionary of parameters back into a binary payload.
-    """
+    """Serialize an operation code and its parameters into a binary payload."""
     stream = BytesIO()
 
     if operation_code == OperationCode.DiffieHellmanResponse:

@@ -6,6 +6,8 @@ on:
   pull_request:
     branches: ["master"]
   workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * *" # nightly e2e against Photon Cloud
 
 jobs:
   lint:
@@ -37,3 +39,19 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install -e ".[test]"
       - run: python -m pytest -q
+
+  e2e:
+    # Live servers: nightly and on demand only, never on PRs (forks have no secret).
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[test]"
+      - name: Run e2e tests
+        env:
+          PHOTON_APP_ID: ${{ secrets.PHOTON_APP_ID }}
+        run: python -m pytest -m e2e -rxs
