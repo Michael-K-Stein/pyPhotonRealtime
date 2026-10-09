@@ -41,7 +41,10 @@ def _service_until(client: RealtimeClient, state: ClientState) -> None:
     deadline = time.monotonic() + TIMEOUT_SECONDS
     while client.state != state:
         if time.monotonic() > deadline:
-            pytest.fail(f"timed out in {client.state} waiting for {state}")
+            pytest.fail(
+                f"timed out in {client.state} ({client.disconnect_cause}) "
+                f"waiting for {state}"
+            )
         client.service()
         time.sleep(1 / 30)
 
