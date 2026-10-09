@@ -24,10 +24,11 @@ from pyphotonrealtime.server.connection import Connection, Role, Session
 from pyphotonrealtime.server.game_server import GameServer
 from pyphotonrealtime.server.master_server import MasterServer
 from pyphotonrealtime.server.name_server import NameServer
+from pyphotonrealtime.server.relay import Relay
 from pyphotonrealtime.server.rooms import REMOVED
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator, Mapping
     from types import TracebackType
 
     from pyphotonrealtime.peer import Parameters
@@ -72,6 +73,9 @@ class PhotonServer:
         public_host: str | None = None,
         regions: tuple[str, ...] = ("local",),
         app_id: str | None = None,
+        passthrough: tuple[str, int] | None = None,
+        idle_timeout: float | None = None,
+        handlers: Mapping[Role, Callable[[PhotonServer], RoleHandler]] | None = None,
     ) -> None:
         """Configure the server; nothing listens until :meth:`start`.
 
@@ -84,6 +88,15 @@ class PhotonServer:
                 Server hops; defaults to ``host`` (or 127.0.0.1 for 0.0.0.0).
             regions: Region codes the Name Server lists, all served here.
             app_id: Only accept this app id; None accepts any.
+            passthrough: ``(host, port)`` to relay clients of other app ids
+                to, byte for byte, instead of rejecting them; e.g. the real
+                Name Server when a hosts-file redirect sends every Photon
+                game here. Give an IP, not a redirected host name. See
+                :meth:`passthrough_address` for finer control.
+            idle_timeout: Drop clients that send nothing (not even a
+                keep-alive) for this many seconds; None never does.
+            handlers: Per-role factories replacing the default Name, Master
+                or Game Server logic, e.g. ``{Role.GameServer: MyGameServer}``.
         """
         self.host = host
         self.name_server_port = name_server_port
@@ -97,13 +110,21 @@ class PhotonServer:
         self.rooms: dict[str, Room] = {}
         self.sessions: dict[str, Session] = {}
         self.connections: set[Connection] = set()
-        self._handlers: dict[Role, RoleHandler] = {
-            Role.NameServer: NameServer(self),
-            Role.MasterServer: MasterServer(self),
-            Role.GameServer: GameServer(self),
+        self.passthrough = passthrough
+        self.idle_timeout = idle_timeout
+        factories: dict[Role, Callable[[PhotonServer], RoleHandler]] = {
+            Role.NameServer: NameServer,
+            Role.MasterServer: MasterServer,
+            Role.GameServer: GameServer,
+            **(handlers or {}),
         }
+        self.handlers: dict[Role, RoleHandler] = {
+            role: factory(self) for role, factory in factories.items()
+        }
+        """The logic behind each listener; replace an entry before :meth:`start`."""
         self._selector: selectors.BaseSelector | None = None
         self._listeners: list[socket.socket] = []
+        self._relays: set[Relay] = set()
         self._thread: threading.Thread | None = None
         self._running = threading.Event()
         self._lock = threading.RLock()
@@ -141,6 +162,11 @@ class PhotonServer:
         for connection in list(self.connections):
             connection.sock.close()
         self.connections.clear()
+        for relay in self._relays:
+            relay.close()
+        for relay in self._relays:
+            relay.join()
+        self._relays.clear()
         for listener in self._listeners:
             listener.close()
         self._listeners.clear()
@@ -205,6 +231,22 @@ class PhotonServer:
         """
         return self.app_id is None or connection.app_id == self.app_id.replace("-", "")
 
+    def passthrough_address(
+        self, connection: Connection, init: InitRequestPacket
+    ) -> tuple[str, int] | None:
+        """Where to relay a client to instead of serving it, decided on its Init.
+
+        By default, clients whose app id isn't accepted go to ``passthrough``
+        (when set). Override to route by app id, role or peer address.
+
+        Returns:
+            ``(host, port)`` to relay to, or None to serve the client here.
+        """
+        del init
+        if self.passthrough is None or self.check_app_id(connection):
+            return None
+        return self.passthrough
+
     def new_session(self, user_id: str) -> tuple[str, Session]:
         """Issue a token for ``user_id``.
 
@@ -257,7 +299,10 @@ class PhotonServer:
                 else:
                     self._read(key.data)
             with self._lock:
-                self._handlers[Role.GameServer].tick(time.monotonic())
+                now = time.monotonic()
+                for handler in self.handlers.values():
+                    handler.tick(now)
+                self._drop_idle(now)
                 self._flush_all()
 
     def _accept(self, listener: socket.socket, role: Role) -> None:
@@ -285,14 +330,17 @@ class PhotonServer:
             return
         with self._lock:
             try:
-                packets = connection.feed(data)
+                packets = connection.feed(data, self.passthrough_address)
             except (ValueError, TypeError) as exc:
                 log.warning(
                     "%r sent garbage: %s (%s)", connection, exc, data[:64].hex(" ")
                 )
                 self._drop(connection)
                 return
-            handler = self._handlers[connection.role]
+            if connection.passthrough is not None:
+                self._relay(connection, connection.passthrough)
+                return
+            handler = self.handlers[connection.role]
             for packet in packets:
                 if isinstance(packet, PhotonOperationPacket):
                     self._dispatch(handler, connection, packet)
@@ -321,6 +369,26 @@ class PhotonServer:
                 encrypt=encrypted,
             )
 
+    def _relay(self, connection: Connection, upstream: tuple[str, int]) -> None:
+        assert self._selector is not None  # noqa: S101 -- set by start()
+        self.connections.discard(connection)
+        self._selector.unregister(connection.sock)
+        log.info(
+            "%r: app id %s relayed to %s:%d", connection, connection.app_id, *upstream
+        )
+        self._relays = {relay for relay in self._relays if relay.is_alive()}
+        relay = Relay(connection.sock, upstream, bytes(connection.preamble or b""))
+        self._relays.add(relay)
+        relay.start()
+
+    def _drop_idle(self, now: float) -> None:
+        if self.idle_timeout is None:
+            return
+        for connection in list(self.connections):
+            if now - connection.last_received >= self.idle_timeout:
+                log.info("%r timed out", connection)
+                self._drop(connection)
+
     def _flush_all(self) -> None:
         for connection in list(self.connections):
             if connection.outbox:
@@ -345,4 +413,4 @@ class PhotonServer:
         connection.sock.close()
         log.debug("%r disconnected", connection)
         with self._lock:
-            self._handlers[connection.role].disconnected(connection)
+            self.handlers[connection.role].disconnected(connection)
